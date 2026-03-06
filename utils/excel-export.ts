@@ -58,10 +58,19 @@ export function copyTableToClipboard(
 }
 
 function buildSheetData(table: ParsedTable, withIndex: boolean): string[][] {
-  const headers = withIndex ? ['#', ...table.headers] : [...table.headers];
-  const rows = table.rows.map((row, i) =>
-    withIndex ? [String(i + 1), ...row] : [...row],
-  );
+  if (!withIndex) {
+    return [table.headers, ...table.rows];
+  }
+
+  const useCssNumbers =
+    table.hasCssRowNumbers && table.cssRowNumbers.length === table.rows.length;
+
+  const headers = ['#', ...table.headers];
+  const rows = table.rows.map((row, i) => {
+    const num = useCssNumbers ? table.cssRowNumbers[i] : String(i + 1);
+    return [num, ...row];
+  });
+
   return [headers, ...rows];
 }
 

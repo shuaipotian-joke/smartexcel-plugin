@@ -7,6 +7,7 @@ export interface ParsedTable {
   rowCount: number;
   colCount: number;
   hasCssRowNumbers: boolean;
+  cssRowNumbers: string[];
 }
 
 let tableCounter = 0;
@@ -21,6 +22,7 @@ export function detectTables(): HTMLTableElement[] {
 export function parseTable(table: HTMLTableElement): ParsedTable {
   const headers: string[] = [];
   const rows: string[][] = [];
+  const dataRowElements: Element[] = [];
 
   const thead = table.querySelector('thead');
   if (thead) {
@@ -33,7 +35,7 @@ export function parseTable(table: HTMLTableElement): ParsedTable {
   }
 
   const bodyRows = thead
-    ? table.querySelectorAll(':scope > tbody > tr, :scope > tbody > tr')
+    ? table.querySelectorAll(':scope > tbody > tr')
     : table.querySelectorAll('tr');
 
   bodyRows.forEach((row, index) => {
@@ -55,6 +57,7 @@ export function parseTable(table: HTMLTableElement): ParsedTable {
 
     if (rowData.length > 0 && rowData.some((cell) => cell.trim() !== '')) {
       rows.push(rowData);
+      dataRowElements.push(row);
     }
   });
 
@@ -66,6 +69,9 @@ export function parseTable(table: HTMLTableElement): ParsedTable {
     `Table ${++tableCounter}`;
 
   const hasCssRowNumbers = detectCssRowNumbers(table);
+  const cssRowNumbers = hasCssRowNumbers
+    ? extractCssRowNumbers(dataRowElements)
+    : [];
 
   return {
     id: `table-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -76,26 +82,68 @@ export function parseTable(table: HTMLTableElement): ParsedTable {
     rowCount: rows.length,
     colCount: Math.max(headers.length, rows[0]?.length ?? 0),
     hasCssRowNumbers,
+    cssRowNumbers,
   };
 }
 
 function detectCssRowNumbers(table: HTMLTableElement): boolean {
-  const classHint = table.className.includes('row-number');
-  if (classHint) return true;
+  if (table.className.includes('row-number')) return true;
 
-  const testRow = table.querySelector('tbody tr') ?? table.querySelector('tr:nth-child(2)');
+  const testRow =
+    table.querySelector('tbody tr') ??
+    table.querySelector('tr:nth-child(2)');
   if (!testRow) return false;
 
   try {
     const style = window.getComputedStyle(testRow, '::before');
     const content = style.getPropertyValue('content');
-    if (content && content !== 'none' && content !== '""' && content !== "''") {
+    if (content && content !== 'none' && content !== 'normal' && content !== '""' && content !== "''") {
       const display = style.getPropertyValue('display');
       return display !== 'none';
     }
   } catch {}
 
   return false;
+}
+
+function extractCssRowNumbers(rowElements: Element[]): string[] {
+  const results: string[] = [];
+  let rank = 0;
+
+  for (const row of rowElements) {
+    const el = row as HTMLElement;
+    const hasRank = rowHasVisibleBefore(el) && !isNoRankRow(el);
+
+    if (hasRank) {
+      rank++;
+      results.push(String(rank));
+    } else {
+      results.push('');
+    }
+  }
+
+  return results;
+}
+
+function rowHasVisibleBefore(el: HTMLElement): boolean {
+  try {
+    const style = window.getComputedStyle(el, '::before');
+    const content = style.getPropertyValue('content');
+    const display = style.getPropertyValue('display');
+
+    if (display === 'none') return false;
+    if (!content || content === 'none' || content === 'normal') return false;
+    if (content === '""' || content === "''") return false;
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isNoRankRow(el: HTMLElement): boolean {
+  const cl = el.className.toLowerCase();
+  return cl.includes('norank') || cl.includes('no-rank') || cl.includes('header');
 }
 
 function getCellText(cell: HTMLElement): string {
