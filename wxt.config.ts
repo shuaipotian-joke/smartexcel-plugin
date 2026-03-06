@@ -7,8 +7,12 @@ export default defineConfig({
     description: '智能识别网页表格，一键导出为 Excel 文件',
     version: '0.1.0',
     permissions: ['activeTab', 'storage'],
+    icons: {
+      128: '/icon-128.png',
+    },
     action: {
       default_title: 'SmartExcel',
+      default_icon: '/icon-128.png',
     },
   },
 });
