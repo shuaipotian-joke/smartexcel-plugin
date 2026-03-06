@@ -19,13 +19,23 @@ export default function TableOverlay() {
     table: null,
   });
   const [menuOpen, setMenuOpen] = useState(false);
+  const [withIndex, setWithIndex] = useState(false);
   const [toast, setToast] = useState('');
   const hideTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const fabRef = useRef<HTMLDivElement>(null);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(''), 2000);
   }, []);
+
+  useEffect(() => {
+    if (fab.table?.hasCssRowNumbers) {
+      setWithIndex(true);
+    } else {
+      setWithIndex(false);
+    }
+  }, [fab.table]);
 
   useEffect(() => {
     if (!isEnabled) return;
@@ -43,8 +53,8 @@ export default function TableOverlay() {
 
       setFab({
         visible: true,
-        x: rect.right + window.scrollX - 40,
-        y: rect.top + window.scrollY + 4,
+        x: rect.right - 40,
+        y: rect.top + 4,
         table: parsed,
       });
     };
@@ -52,48 +62,58 @@ export default function TableOverlay() {
     const handleMouseOut = (e: MouseEvent) => {
       const related = e.relatedTarget as HTMLElement | null;
       if (related?.closest('table')) return;
+      if (fabRef.current?.contains(related as Node)) return;
 
       hideTimer.current = setTimeout(() => {
         if (!menuOpen) {
           setFab((prev) => ({ ...prev, visible: false }));
+          setMenuOpen(false);
         }
-      }, 300);
+      }, 400);
     };
 
-    document.addEventListener('mouseover', handleMouseOver);
-    document.addEventListener('mouseout', handleMouseOut);
+    const handleScroll = () => {
+      if (fab.visible && !menuOpen) {
+        setFab((prev) => ({ ...prev, visible: false }));
+      }
+    };
+
+    document.addEventListener('mouseover', handleMouseOver, true);
+    document.addEventListener('mouseout', handleMouseOut, true);
+    window.addEventListener('scroll', handleScroll, true);
 
     return () => {
-      document.removeEventListener('mouseover', handleMouseOver);
-      document.removeEventListener('mouseout', handleMouseOut);
+      document.removeEventListener('mouseover', handleMouseOver, true);
+      document.removeEventListener('mouseout', handleMouseOut, true);
+      window.removeEventListener('scroll', handleScroll, true);
       clearTimeout(hideTimer.current);
     };
-  }, [menuOpen, isEnabled]);
+  }, [menuOpen, isEnabled, fab.visible]);
 
   const handleExport = useCallback(
     (format: 'xlsx' | 'csv') => {
       if (!fab.table) return;
       try {
-        exportToExcel(fab.table, format);
+        exportToExcel(fab.table, { format, withIndex });
         showToast(`已导出为 ${format.toUpperCase()}`);
       } catch {
         showToast('导出失败，请重试');
       }
       setMenuOpen(false);
     },
-    [fab.table, showToast],
+    [fab.table, withIndex, showToast],
   );
 
   const handleCopy = useCallback(async () => {
     if (!fab.table) return;
     try {
-      await copyTableToClipboard(fab.table);
+      await copyTableToClipboard(fab.table, withIndex);
       showToast('已复制到剪贴板');
     } catch {
       showToast('复制失败，请重试');
     }
     setMenuOpen(false);
-  }, [fab.table, showToast]);
+  }, [fab.table, withIndex, showToast]);
 
   const handleSendToWeb = useCallback(() => {
     browser.runtime.sendMessage({
@@ -108,26 +128,28 @@ export default function TableOverlay() {
   return (
     <>
       <div
+        ref={fabRef}
         style={{
-          position: 'absolute',
+          position: 'fixed',
           left: `${fab.x}px`,
           top: `${fab.y}px`,
           zIndex: 2147483647,
+          pointerEvents: 'auto',
         }}
         onMouseEnter={() => clearTimeout(hideTimer.current)}
         onMouseLeave={() => {
           if (!menuOpen) {
             hideTimer.current = setTimeout(() => {
               setFab((prev) => ({ ...prev, visible: false }));
-            }, 300);
+            }, 400);
           }
         }}
       >
         <button
           onClick={() => setMenuOpen(!menuOpen)}
           style={{
-            width: '32px',
-            height: '32px',
+            width: '34px',
+            height: '34px',
             borderRadius: '8px',
             backgroundColor: '#1a73f5',
             border: 'none',
@@ -135,16 +157,17 @@ export default function TableOverlay() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            boxShadow: '0 2px 12px rgba(26,115,245,0.4)',
             transition: 'transform 0.15s, box-shadow 0.15s',
+            pointerEvents: 'auto',
           }}
           onMouseOver={(e) => {
-            e.currentTarget.style.transform = 'scale(1.1)';
-            e.currentTarget.style.boxShadow = '0 4px 12px rgba(26,115,245,0.35)';
+            e.currentTarget.style.transform = 'scale(1.12)';
+            e.currentTarget.style.boxShadow = '0 4px 16px rgba(26,115,245,0.5)';
           }}
           onMouseOut={(e) => {
             e.currentTarget.style.transform = 'scale(1)';
-            e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+            e.currentTarget.style.boxShadow = '0 2px 12px rgba(26,115,245,0.4)';
           }}
           title="SmartExcel - 导出表格"
         >
@@ -161,25 +184,67 @@ export default function TableOverlay() {
           <div
             style={{
               position: 'absolute',
-              top: '36px',
+              top: '38px',
               right: '0',
-              width: '200px',
+              width: '220px',
               backgroundColor: '#fff',
               borderRadius: '12px',
-              boxShadow: '0 8px 30px rgba(0,0,0,0.12)',
+              boxShadow: '0 8px 30px rgba(0,0,0,0.15)',
               border: '1px solid #e5e7eb',
               overflow: 'hidden',
               animation: 'smartexcel-fadein 0.15s ease',
+              pointerEvents: 'auto',
+              fontFamily: 'system-ui, -apple-system, sans-serif',
             }}
           >
-            <div style={{ padding: '10px 14px', backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontSize: '12px', color: '#6b7280' }}>
-              {fab.table?.rowCount} 行 × {fab.table?.colCount} 列
+            {/* Table info */}
+            <div style={{
+              padding: '10px 14px', backgroundColor: '#f9fafb',
+              borderBottom: '1px solid #e5e7eb', fontSize: '12px', color: '#6b7280',
+            }}>
+              📋 {fab.table?.rowCount} 行 × {fab.table?.colCount} 列
+            </div>
+
+            {/* Index toggle — auto-shown when CSS row numbers detected */}
+            <div
+              style={{
+                padding: '8px 14px', display: 'flex', alignItems: 'center',
+                justifyContent: 'space-between', borderBottom: '1px solid #f3f4f6',
+                backgroundColor: fab.table?.hasCssRowNumbers ? '#eff6ff' : 'transparent',
+              }}
+            >
+              <span style={{ fontSize: '12px', color: '#374151' }}>
+                {fab.table?.hasCssRowNumbers ? '🔢 检测到序号列' : '🔢 添加序号列'}
+              </span>
+              <label style={{
+                position: 'relative', display: 'inline-block',
+                width: '36px', height: '20px', cursor: 'pointer',
+              }}>
+                <input
+                  type="checkbox"
+                  checked={withIndex}
+                  onChange={(e) => setWithIndex(e.target.checked)}
+                  style={{ opacity: 0, width: 0, height: 0, position: 'absolute' }}
+                />
+                <span style={{
+                  position: 'absolute', inset: 0, borderRadius: '10px',
+                  backgroundColor: withIndex ? '#1a73f5' : '#d1d5db',
+                  transition: 'background-color 0.2s',
+                }} />
+                <span style={{
+                  position: 'absolute', top: '2px',
+                  left: withIndex ? '18px' : '2px',
+                  width: '16px', height: '16px', borderRadius: '50%',
+                  backgroundColor: '#fff', transition: 'left 0.2s',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                }} />
+              </label>
             </div>
 
             <MenuItem icon="📊" label="导出为 Excel" sublabel=".xlsx" onClick={() => handleExport('xlsx')} />
             <MenuItem icon="📄" label="导出为 CSV" sublabel=".csv" onClick={() => handleExport('csv')} />
             <MenuItem icon="📋" label="复制到剪贴板" onClick={handleCopy} />
-            <div style={{ height: '1px', backgroundColor: '#e5e7eb' }} />
+            <div style={{ height: '1px', backgroundColor: '#f3f4f6', margin: '0 10px' }} />
             <MenuItem icon="🚀" label="发送到 SmartExcel" sublabel="AI 处理" onClick={handleSendToWeb} />
           </div>
         )}
@@ -188,11 +253,13 @@ export default function TableOverlay() {
       {toast && (
         <div style={{
           position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
-          backgroundColor: '#1a73f5', color: '#fff', padding: '10px 20px',
-          borderRadius: '8px', fontSize: '14px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          backgroundColor: '#1a73f5', color: '#fff', padding: '10px 24px',
+          borderRadius: '10px', fontSize: '14px', boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
           zIndex: 2147483647, animation: 'smartexcel-fadein 0.2s ease',
+          pointerEvents: 'auto', fontFamily: 'system-ui, -apple-system, sans-serif',
+          whiteSpace: 'nowrap',
         }}>
-          {toast}
+          ✓ {toast}
         </div>
       )}
 
@@ -219,12 +286,14 @@ function MenuItem({ icon, label, sublabel, onClick }: {
         width: '100%', display: 'flex', alignItems: 'center', gap: '10px',
         padding: '10px 14px', backgroundColor: 'transparent', border: 'none',
         cursor: 'pointer', fontSize: '13px', color: '#374151',
-        transition: 'background-color 0.1s', textAlign: 'left',
+        transition: 'background-color 0.12s', textAlign: 'left',
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+        pointerEvents: 'auto',
       }}
       onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#f3f4f6'; }}
       onMouseOut={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
     >
-      <span style={{ fontSize: '16px' }}>{icon}</span>
+      <span style={{ fontSize: '16px', lineHeight: 1 }}>{icon}</span>
       <span style={{ flex: 1 }}>{label}</span>
       {sublabel && <span style={{ fontSize: '11px', color: '#9ca3af' }}>{sublabel}</span>}
     </button>

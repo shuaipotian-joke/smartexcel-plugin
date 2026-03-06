@@ -3,13 +3,19 @@ import type { ParsedTable } from './table-parser';
 
 export type ExportFormat = 'xlsx' | 'csv';
 
+export interface ExportOptions {
+  format?: ExportFormat;
+  withIndex?: boolean;
+}
+
 export function exportToExcel(
   table: ParsedTable,
-  format: ExportFormat = 'xlsx'
+  options: ExportOptions = {},
 ): void {
-  const data = [table.headers, ...table.rows];
-  const worksheet = XLSX.utils.aoa_to_sheet(data);
+  const { format = 'xlsx', withIndex = false } = options;
 
+  const data = buildSheetData(table, withIndex);
+  const worksheet = XLSX.utils.aoa_to_sheet(data);
   autoFitColumns(worksheet, data);
 
   const workbook = XLSX.utils.book_new();
@@ -17,30 +23,24 @@ export function exportToExcel(
   XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
 
   const fileName = `${table.title.replace(/[^\w\u4e00-\u9fff]/g, '_')}.${format}`;
-
-  if (format === 'csv') {
-    XLSX.writeFile(workbook, fileName, { bookType: 'csv' });
-  } else {
-    XLSX.writeFile(workbook, fileName, { bookType: 'xlsx' });
-  }
+  XLSX.writeFile(workbook, fileName, { bookType: format });
 }
 
 export function exportMultipleTables(
   tables: ParsedTable[],
-  fileName = 'tables-export'
+  fileName = 'tables-export',
+  withIndex = false,
 ): void {
   const workbook = XLSX.utils.book_new();
 
-  tables.forEach((table, index) => {
-    const data = [table.headers, ...table.rows];
+  tables.forEach((table, i) => {
+    const data = buildSheetData(table, withIndex);
     const worksheet = XLSX.utils.aoa_to_sheet(data);
     autoFitColumns(worksheet, data);
 
     let sheetName = sanitizeSheetName(table.title);
-    if (sheetName.length > 28) {
-      sheetName = sheetName.slice(0, 28);
-    }
-    sheetName = `${sheetName}_${index + 1}`;
+    if (sheetName.length > 28) sheetName = sheetName.slice(0, 28);
+    sheetName = `${sheetName}_${i + 1}`;
 
     XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
   });
@@ -48,16 +48,24 @@ export function exportMultipleTables(
   XLSX.writeFile(workbook, `${fileName}.xlsx`, { bookType: 'xlsx' });
 }
 
-export function copyTableToClipboard(table: ParsedTable): Promise<void> {
-  const data = [table.headers, ...table.rows];
+export function copyTableToClipboard(
+  table: ParsedTable,
+  withIndex = false,
+): Promise<void> {
+  const data = buildSheetData(table, withIndex);
   const text = data.map((row) => row.join('\t')).join('\n');
   return navigator.clipboard.writeText(text);
 }
 
-function autoFitColumns(
-  worksheet: XLSX.WorkSheet,
-  data: string[][]
-): void {
+function buildSheetData(table: ParsedTable, withIndex: boolean): string[][] {
+  const headers = withIndex ? ['#', ...table.headers] : [...table.headers];
+  const rows = table.rows.map((row, i) =>
+    withIndex ? [String(i + 1), ...row] : [...row],
+  );
+  return [headers, ...rows];
+}
+
+function autoFitColumns(worksheet: XLSX.WorkSheet, data: string[][]): void {
   const colWidths: number[] = [];
 
   data.forEach((row) => {

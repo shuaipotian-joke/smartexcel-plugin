@@ -6,6 +6,7 @@ export interface ParsedTable {
   element: HTMLTableElement;
   rowCount: number;
   colCount: number;
+  hasCssRowNumbers: boolean;
 }
 
 let tableCounter = 0;
@@ -23,22 +24,27 @@ export function parseTable(table: HTMLTableElement): ParsedTable {
 
   const thead = table.querySelector('thead');
   if (thead) {
-    const headerCells = thead.querySelectorAll('th, td');
-    headerCells.forEach((cell) => {
-      headers.push(getCellText(cell as HTMLElement));
-    });
+    const lastHeaderRow = thead.querySelector('tr:last-child');
+    if (lastHeaderRow) {
+      lastHeaderRow.querySelectorAll('th, td').forEach((cell) => {
+        headers.push(getCellText(cell as HTMLElement));
+      });
+    }
   }
 
-  const bodyRows = table.querySelectorAll('tbody tr, tr');
-  const startIndex = thead ? 0 : 1;
+  const bodyRows = thead
+    ? table.querySelectorAll(':scope > tbody > tr, :scope > tbody > tr')
+    : table.querySelectorAll('tr');
 
   bodyRows.forEach((row, index) => {
     if (!thead && index === 0) {
-      const cells = row.querySelectorAll('th, td');
-      cells.forEach((cell) => {
-        headers.push(getCellText(cell as HTMLElement));
-      });
-      return;
+      const isHeader = row.querySelector('th') !== null;
+      if (isHeader) {
+        row.querySelectorAll('th, td').forEach((cell) => {
+          headers.push(getCellText(cell as HTMLElement));
+        });
+        return;
+      }
     }
 
     const cells = row.querySelectorAll('td, th');
@@ -59,6 +65,8 @@ export function parseTable(table: HTMLTableElement): ParsedTable {
     ariaLabel ||
     `Table ${++tableCounter}`;
 
+  const hasCssRowNumbers = detectCssRowNumbers(table);
+
   return {
     id: `table-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     title,
@@ -67,13 +75,31 @@ export function parseTable(table: HTMLTableElement): ParsedTable {
     element: table,
     rowCount: rows.length,
     colCount: Math.max(headers.length, rows[0]?.length ?? 0),
+    hasCssRowNumbers,
   };
+}
+
+function detectCssRowNumbers(table: HTMLTableElement): boolean {
+  const classHint = table.className.includes('row-number');
+  if (classHint) return true;
+
+  const testRow = table.querySelector('tbody tr') ?? table.querySelector('tr:nth-child(2)');
+  if (!testRow) return false;
+
+  try {
+    const style = window.getComputedStyle(testRow, '::before');
+    const content = style.getPropertyValue('content');
+    if (content && content !== 'none' && content !== '""' && content !== "''") {
+      const display = style.getPropertyValue('display');
+      return display !== 'none';
+    }
+  } catch {}
+
+  return false;
 }
 
 function getCellText(cell: HTMLElement): string {
   const cloned = cell.cloneNode(true) as HTMLElement;
-
-  cloned.querySelectorAll('script, style').forEach((el) => el.remove());
-
-  return cloned.textContent?.trim() ?? '';
+  cloned.querySelectorAll('script, style, .mw-collapsible-content').forEach((el) => el.remove());
+  return cloned.textContent?.trim().replace(/\s+/g, ' ') ?? '';
 }
