@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { parseTable, type ParsedTable } from '@/utils/table-parser';
 import { exportToExcel, copyTableToClipboard } from '@/utils/excel-export';
 import { useExtensionStore } from '@/utils/store';
+import { checkAndRecordUsage, getRemainingCount, needsLogin, redirectToLogin } from '@/utils/export-limit';
 
 interface FloatingButton {
   visible: boolean;
@@ -93,9 +94,21 @@ export default function TableOverlay() {
   const handleExport = useCallback(
     (format: 'xlsx' | 'csv') => {
       if (!fab.table) return;
+
+      // 检查使用次数限制
+      if (!checkAndRecordUsage()) {
+        // 如果需要登录，不执行导出，等待页面跳转
+        return;
+      }
+
       try {
         exportToExcel(fab.table, { format, withIndex });
-        showToast(`已导出为 ${format.toUpperCase()}`);
+        const remaining = getRemainingCount();
+        if (remaining > 0) {
+          showToast(`已导出为 ${format.toUpperCase()}，剩余 ${remaining} 次免费`);
+        } else {
+          showToast(`已导出为 ${format.toUpperCase()}`);
+        }
       } catch {
         showToast('导出失败，请重试');
       }
@@ -106,9 +119,20 @@ export default function TableOverlay() {
 
   const handleCopy = useCallback(async () => {
     if (!fab.table) return;
+
+    // 检查使用次数限制
+    if (!checkAndRecordUsage()) {
+      return;
+    }
+
     try {
       await copyTableToClipboard(fab.table, withIndex);
-      showToast('已复制到剪贴板');
+      const remaining = getRemainingCount();
+      if (remaining > 0) {
+        showToast(`已复制到剪贴板，剩余 ${remaining} 次免费`);
+      } else {
+        showToast('已复制到剪贴板');
+      }
     } catch {
       showToast('复制失败，请重试');
     }
