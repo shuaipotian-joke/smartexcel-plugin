@@ -2,7 +2,26 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { parseTable, type ParsedTable } from '@/utils/table-parser';
 import { exportToExcel, copyTableToClipboard } from '@/utils/excel-export';
 import { useExtensionStore } from '@/utils/store';
-import { checkAndRecordUsage, getRemainingCount, needsLogin, redirectToLogin } from '@/utils/export-limit';
+
+type CreditCheckResult = {
+  allowed: boolean;
+  remaining?: number;
+  isLoggedIn: boolean;
+  reason?: string;
+};
+
+async function requestCheckAndConsume(): Promise<CreditCheckResult> {
+  try {
+    return await browser.runtime.sendMessage({ type: 'CHECK_AND_CONSUME' });
+  } catch {
+    // Fallback if background not available
+    return { allowed: false, reason: 'error', isLoggedIn: false };
+  }
+}
+
+function openPaymentPage() {
+  browser.runtime.sendMessage({ type: 'OPEN_PAYMENT_PAGE' });
+}
 
 interface FloatingButton {
   visible: boolean;
@@ -92,51 +111,59 @@ export default function TableOverlay() {
   }, [menuOpen, isEnabled, fab.visible]);
 
   const handleExport = useCallback(
-    (format: 'xlsx' | 'csv') => {
+    async (format: 'xlsx' | 'csv') => {
       if (!fab.table) return;
+      setMenuOpen(false);
 
-      // 检查使用次数限制
-      if (!checkAndRecordUsage()) {
-        // 如果需要登录，不执行导出，等待页面跳转
+      // 向后台请求积分检查并扣除
+      const result = await requestCheckAndConsume();
+
+      if (!result.allowed) {
+        // 无积分，打开支付页面
+        openPaymentPage();
         return;
       }
 
       try {
         exportToExcel(fab.table, { format, withIndex });
-        const remaining = getRemainingCount();
-        if (remaining > 0) {
-          showToast(`已导出为 ${format.toUpperCase()}，剩余 ${remaining} 次免费`);
+        if (result.isLoggedIn) {
+          const hint = result.remaining !== undefined ? `，剩余 ${result.remaining} 积分` : '';
+          showToast(`已导出为 ${format.toUpperCase()}${hint}`);
         } else {
-          showToast(`已导出为 ${format.toUpperCase()}`);
+          const hint = result.remaining !== undefined && result.remaining > 0
+            ? `，剩余 ${result.remaining} 次免费`
+            : result.remaining === 0
+              ? '，免费次数已用完'
+              : '';
+          showToast(`已导出为 ${format.toUpperCase()}${hint}`);
         }
       } catch {
         showToast('导出失败，请重试');
       }
-      setMenuOpen(false);
     },
     [fab.table, withIndex, showToast],
   );
 
   const handleCopy = useCallback(async () => {
     if (!fab.table) return;
+    setMenuOpen(false);
 
-    // 检查使用次数限制
-    if (!checkAndRecordUsage()) {
+    const result = await requestCheckAndConsume();
+
+    if (!result.allowed) {
+      openPaymentPage();
       return;
     }
 
     try {
       await copyTableToClipboard(fab.table, withIndex);
-      const remaining = getRemainingCount();
-      if (remaining > 0) {
-        showToast(`已复制到剪贴板，剩余 ${remaining} 次免费`);
-      } else {
-        showToast('已复制到剪贴板');
-      }
+      const hint = result.isLoggedIn
+        ? (result.remaining !== undefined ? `，剩余 ${result.remaining} 积分` : '')
+        : (result.remaining !== undefined && result.remaining > 0 ? `，剩余 ${result.remaining} 次免费` : '');
+      showToast(`已复制到剪贴板${hint}`);
     } catch {
       showToast('复制失败，请重试');
     }
-    setMenuOpen(false);
   }, [fab.table, withIndex, showToast]);
 
   const handleSendToWeb = useCallback(() => {

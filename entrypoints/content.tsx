@@ -27,6 +27,13 @@ export default defineContentScript({
 
     ui.mount();
 
+    // Relay postMessage from smartexcel.app pages (e.g. plugin-payment after payment success)
+    window.addEventListener('message', (e: MessageEvent) => {
+      if (e.data?.type === 'SE_PLUGIN_SYNC' && e.data?.data) {
+        browser.runtime.sendMessage({ type: 'PLUGIN_SYNC', data: e.data.data });
+      }
+    });
+
     browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const tables = detectTables();
 
