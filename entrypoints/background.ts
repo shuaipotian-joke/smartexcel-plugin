@@ -1,4 +1,4 @@
-const SMARTEXCEL_URL = 'https://smartexcel.app';
+const SMARTEXCEL_URL = 'https://smarterexcel.com';
 const PLUGIN_PAYMENT_URL = `${SMARTEXCEL_URL}/plugin-payment?closeAfterPayment=true`;
 
 // ─── Credit helpers ────────────────────────────────────────────────────────

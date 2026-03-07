@@ -1,12 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { TableInfo } from '@/utils/messaging';
 
+type CreditState = {
+  credits: number;
+  loggedIn: boolean;
+  freeUsed: number;
+  freeLimit: number;
+};
+
 export default function App() {
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [creditState, setCreditState] = useState<CreditState | null>(null);
 
   useEffect(() => {
     loadTables();
+    loadCreditState();
   }, []);
 
   async function loadTables() {
@@ -23,12 +32,35 @@ export default function App() {
     }
   }
 
+  async function loadCreditState() {
+    try {
+      const state = await browser.runtime.sendMessage({ type: 'GET_STATE' });
+      setCreditState(state);
+    } catch {
+      // ignore
+    }
+  }
+
   const handleExportAll = useCallback(async () => {
     const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
     if (tab.id) {
       browser.tabs.sendMessage(tab.id, { type: 'EXPORT_ALL' });
     }
   }, []);
+
+  const handleAddCredits = useCallback(() => {
+    browser.runtime.sendMessage({ type: 'OPEN_PAYMENT_PAGE' });
+  }, []);
+
+  // Format remaining display
+  const getRemainingText = () => {
+    if (!creditState) return '';
+    if (creditState.loggedIn) {
+      return `剩余 ${creditState.credits} 次`;
+    }
+    const remaining = creditState.freeLimit - creditState.freeUsed;
+    return `免费剩余 ${remaining} 次`;
+  };
 
   return (
     <div className="w-[360px] min-h-[200px] bg-white">
@@ -42,11 +74,26 @@ export default function App() {
             <line x1="8" y1="17" x2="16" y2="17" />
           </svg>
         </div>
-        <div>
+        <div className="flex-1">
           <h1 className="text-white font-semibold text-sm">SmartExcel</h1>
           <p className="text-white/70 text-xs">网页表格智能导出</p>
         </div>
       </div>
+
+      {/* Credit info bar */}
+      {creditState && (
+        <div className="px-4 py-2 bg-brand-50 border-b border-brand-100 flex items-center justify-between">
+          <span className="text-xs text-brand-700 font-medium">
+            {getRemainingText()}
+          </span>
+          <button
+            className="text-xs bg-brand-600 text-white px-3 py-1 rounded-full hover:bg-brand-700 transition-colors font-medium"
+            onClick={handleAddCredits}
+          >
+            添加次数
+          </button>
+        </div>
+      )}
 
       {/* Content */}
       <div className="p-4">

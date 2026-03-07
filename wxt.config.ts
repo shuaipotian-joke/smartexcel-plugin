@@ -7,7 +7,7 @@ export default defineConfig({
     description: '智能识别网页表格，一键导出为 Excel 文件',
     version: '0.1.1',
     permissions: ['activeTab', 'storage'],
-    host_permissions: ['https://smartexcel.app/*'],
+    host_permissions: ['https://smarterexcel.com/*'],
     icons: {
       128: '/icon-128.png',
     },

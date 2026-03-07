@@ -5,7 +5,7 @@ const STORAGE_KEY = 'smartexcel_usage_count';
 const FREE_LIMIT = 3;
 
 // 主站登录页面 URL
-const LOGIN_URL = 'https://smartexcel.ai/auth/login';
+const LOGIN_URL = 'https://smarterexcel.com/auth/login';
 
 interface UsageInfo {
   count: number;

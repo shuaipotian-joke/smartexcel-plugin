@@ -15,7 +15,7 @@ export type MessageType =
   | { type: 'EXPORT_ALL'; payload?: never }
   | { type: 'OPEN_WEBSITE'; payload: { tableId?: string } };
 
-export const WEBSITE_URL = 'https://smartexcel.app';
+export const WEBSITE_URL = 'https://smarterexcel.com';
 
 export function sendMessage(message: MessageType): Promise<any> {
   return browser.runtime.sendMessage(message);
