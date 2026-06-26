@@ -4,6 +4,8 @@ This file is for the `smartexcel-plugin` browser extension repo only.
 
 The plugin is tightly coupled to the sibling website repo `../smartexcel`. The extension is not only a local export tool; it also depends on the website for plugin login, payment, and credit sync. If a task changes extension credits, payment entry, login redirects, or sync behavior, assume the website repo may also need validation or code changes.
 
+The website is now a single Next.js full-stack app. Plugin-facing website APIs live under `/api/plugin/*`; do not reintroduce old `/v1/plugin/*` calls. The extension's production `.env.local` points `WXT_SMARTEXCEL_URL` at `https://smarterexcel.com`.
+
 ## Repo Layout And Important Directories
 
 - `entrypoints/background.ts` is the most important runtime file. It handles credits, login state, payment-page opening, message routing, and sync from the website.
@@ -50,9 +52,21 @@ The plugin is tightly coupled to the sibling website repo `../smartexcel`. The e
 ## Critical Runtime Flows
 
 - Export flow is: content/page UI -> background message -> credit check or free-limit check -> export allowed or payment/login redirect.
+- Logged-in export credit consumption is handled in `entrypoints/background.ts` by calling `https://smarterexcel.com/api/plugin/consume` with the stored plugin bearer token.
+- Plugin auth state is refreshed with `/api/plugin/auth/me`; login ticket creation uses `/api/plugin/auth/create-login-ticket`; logout/revoke uses `/api/plugin/auth/revoke`.
+- Do not use `api.smarterexcel.com` or `/v1/*` for new plugin work. The main domain serves Next API routes under `/api/*`.
 - The main background message types include opening the website, opening the payment page, checking and consuming credits, syncing from the website, and reporting extension state.
 - The extension stores important local state in `browser.storage.local`, including credits, logged-in state, user identity, and free-use counters.
 - Payment completion on the website can sync credits back into the extension. Changes around credits or payment must preserve that bridge.
+- The current new-user bonus displayed by the plugin is 10 credits. Keep popup, settings, and in-page login-required text consistent if this number changes.
+
+## Website Integration Notes
+
+- Local website repo: `C:\project\smartexcel`.
+- Website local app port: `42100`.
+- Website production app on `jokeovh`: container `smartexcel-next`, host port `127.0.0.1:42100`, public domain `https://smarterexcel.com`.
+- Production compose currently builds from `/opt/projects/smartexcel-next-deploy`, not the legacy `/opt/projects/smartexcel` directory. The legacy directory may contain old dirty Go/frontend files; do not reset it casually.
+- When testing plugin credit flows locally, use the website's `/api/plugin/auth/exchange-session`, `/api/plugin/auth/me`, and `/api/plugin/consume` endpoints.
 
 ## What Done Means And How To Verify Work
 
