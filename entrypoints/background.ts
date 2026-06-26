@@ -1,14 +1,15 @@
 const SMARTEXCEL_URL =
   import.meta.env.WXT_SMARTEXCEL_URL || 'http://localhost:3000';
 const PLUGIN_BRIDGE_URL = `${SMARTEXCEL_URL}/plugin-auth/bridge`;
-const PLUGIN_ME_URL = `${SMARTEXCEL_URL}/v1/plugin/auth/me`;
-const PLUGIN_CONSUME_URL = `${SMARTEXCEL_URL}/v1/plugin/consume`;
-const PLUGIN_CREATE_LOGIN_TICKET_URL = `${SMARTEXCEL_URL}/v1/plugin/auth/create-login-ticket`;
-const PLUGIN_REVOKE_URL = `${SMARTEXCEL_URL}/v1/plugin/auth/revoke`;
+const PLUGIN_ME_URL = `${SMARTEXCEL_URL}/api/plugin/auth/me`;
+const PLUGIN_CONSUME_URL = `${SMARTEXCEL_URL}/api/plugin/consume`;
+const PLUGIN_CREATE_LOGIN_TICKET_URL = `${SMARTEXCEL_URL}/api/plugin/auth/create-login-ticket`;
+const PLUGIN_REVOKE_URL = `${SMARTEXCEL_URL}/api/plugin/auth/revoke`;
 const CONTENT_SCRIPT_PATH = 'content-scripts/content.js';
 const CONTEXT_MENU_ROOT_ID = 'smartexcel-context-root';
 const CONTEXT_MENU_EXPORT_XLSX_ID = 'smartexcel-context-export-xlsx';
 const CONTEXT_MENU_EXPORT_CSV_ID = 'smartexcel-context-export-csv';
+const NEW_USER_BONUS_CREDITS = 10;
 type ContextMenuState = {
   tableId: string | null;
   frameId?: number;
@@ -57,8 +58,9 @@ function buildBridgeUrl(options?: {
   return bridgeUrl.toString();
 }
 
-function buildPaymentRedirectPath(planId?: string) {
-  const url = new URL('/pricing', SMARTEXCEL_URL);
+function buildPaymentRedirectPath(planId?: string, lang?: 'zh' | 'en') {
+  const path = lang === 'zh' ? '/zh/pricing' : '/pricing';
+  const url = new URL(path, SMARTEXCEL_URL);
   url.searchParams.set('source', 'extension');
 
   if (planId) {
@@ -668,12 +670,14 @@ export default defineBackground(() => {
 
     if (message.type === 'OPEN_PAYMENT_PAGE') {
       const planId = message.payload?.planId;
+      const lang = message.payload?.lang === 'zh' ? 'zh' : 'en';
+      const redirectTo = buildPaymentRedirectPath(planId, lang);
       openWebsiteWithPluginLogin(
-        buildPaymentRedirectPath(planId),
+        redirectTo,
         buildBridgeUrl({
           authMode: 'register',
           planId,
-          redirectTo: buildPaymentRedirectPath(planId),
+          redirectTo,
         })
       )
         .then(() => sendResponse({ ok: true }))
@@ -745,7 +749,7 @@ export default defineBackground(() => {
     // Get current credit state (for popup display)
     if (message.type === 'GET_STATE') {
       refreshPluginState().then(async (state) => {
-        sendResponse({ ...state, freeUsed: 0, freeLimit: 5 });
+        sendResponse({ ...state, freeUsed: 0, freeLimit: NEW_USER_BONUS_CREDITS });
       });
       return true;
     }

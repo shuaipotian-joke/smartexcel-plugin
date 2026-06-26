@@ -35,8 +35,11 @@ function openLoginPage() {
   void safeSendRuntimeMessage({ type: 'OPEN_LOGIN' });
 }
 
-function openPaymentPage() {
-  void safeSendRuntimeMessage({ type: 'OPEN_PAYMENT_PAGE' });
+function openPaymentPage(lang: Lang) {
+  void safeSendRuntimeMessage({
+    type: 'OPEN_PAYMENT_PAGE',
+    payload: { lang },
+  });
 }
 
 interface FloatingButton {
@@ -221,7 +224,7 @@ export default function TableOverlay() {
           return;
         }
 
-        openPaymentPage();
+        openPaymentPage(lang);
         return;
       }
 

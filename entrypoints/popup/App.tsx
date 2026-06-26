@@ -161,8 +161,11 @@ export default function App() {
   }, []);
 
   const handleAddCredits = useCallback(() => {
-    browser.runtime.sendMessage({ type: 'OPEN_PAYMENT_PAGE' });
-  }, []);
+    browser.runtime.sendMessage({
+      type: 'OPEN_PAYMENT_PAGE',
+      payload: { lang },
+    });
+  }, [lang]);
 
   const handleLogin = useCallback(async () => {
     await browser.runtime.sendMessage({ type: 'OPEN_LOGIN' });

@@ -18,7 +18,7 @@ const zh = {
   creditsRemaining: '剩余 {n} 次',
   addCredits: '添加次数',
   login: '登录',
-  signupBonusHint: '登录后可用，新用户赠送 {n} 次导出',
+  signupBonusHint: '登录后可用，新用户赠送 {n} 点积分',
 
   // No tables state
   noTablesFound: '当前页面未检测到表格',
@@ -51,7 +51,7 @@ const zh = {
   times: '次',
   notLoggedIn: '未登录',
   createAccount: '注册新账号',
-  createAccountForBonus: '注册领取 {n} 次导出',
+  createAccountForBonus: '注册领取 {n} 点积分',
   loggedInAs: '当前账号：{email}',
   logout: '退出登录',
 
@@ -71,7 +71,7 @@ const zh = {
   exportedWithCreditInfo: '已导出为 {fmt}，已扣除 {used} 积分，剩余 {n} 积分',
   creditsLeft: '，剩余 {n} 积分',
   exportingPleaseWait: '请稍等，正在导出…',
-  loginRequiredToExport: '导出前请先登录，新用户赠送 5 次',
+  loginRequiredToExport: '导出前请先登录，新用户赠送 10 点积分',
   exportFailed: '导出失败，请重试',
   copiedToClipboard: '已复制到剪贴板',
   copyFailed: '复制失败，请重试',
@@ -88,7 +88,7 @@ const en: Record<TranslationKey, string> = {
   creditsRemaining: '{n} credits left',
   addCredits: 'Add Credits',
   login: 'Login',
-  signupBonusHint: 'Sign in to export. New users get {n} free exports',
+  signupBonusHint: 'Sign in to export. New users get {n} credits',
 
   noTablesFound: 'No tables found on this page',
   hoverHint: 'Hover over a table to show the export button',
@@ -116,7 +116,7 @@ const en: Record<TranslationKey, string> = {
   times: 'times',
   notLoggedIn: 'Not logged in',
   createAccount: 'Create account',
-  createAccountForBonus: 'Create account and get {n} exports',
+  createAccountForBonus: 'Create account and get {n} credits',
   loggedInAs: 'Signed in as: {email}',
   logout: 'Log out',
 
@@ -134,7 +134,7 @@ const en: Record<TranslationKey, string> = {
   exportedWithCreditInfo: 'Exported as {fmt}. {used} credit deducted, {n} credits left',
   creditsLeft: ', {n} credits left',
   exportingPleaseWait: 'Please wait, exporting...',
-  loginRequiredToExport: 'Please sign in before exporting. New users get 5 free exports',
+  loginRequiredToExport: 'Please sign in before exporting. New users get 10 credits',
   exportFailed: 'Export failed, please retry',
   copiedToClipboard: 'Copied to clipboard',
   copyFailed: 'Copy failed, please retry',

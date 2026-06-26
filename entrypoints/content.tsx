@@ -77,7 +77,10 @@ async function requestCheckAndConsume(amount = 1): Promise<CreditCheckResult> {
   return result ?? { allowed: false, reason: 'error', isLoggedIn: false };
 }
 
-async function ensureExportAccess(amount = 1): Promise<ExportAccessResult> {
+async function ensureExportAccess(
+  amount = 1,
+  lang = detectBrowserLang()
+): Promise<ExportAccessResult> {
   const result = await requestCheckAndConsume(amount);
   if (result.allowed) {
     return result;
@@ -88,7 +91,10 @@ async function ensureExportAccess(amount = 1): Promise<ExportAccessResult> {
     return { ...result, openedFlow: 'login' };
   }
 
-  await safeSendRuntimeMessage({ type: 'OPEN_PAYMENT_PAGE' });
+  await safeSendRuntimeMessage({
+    type: 'OPEN_PAYMENT_PAGE',
+    payload: { lang },
+  });
   return { ...result, openedFlow: 'payment' };
 }
 
@@ -231,7 +237,7 @@ export default defineContentScript({
 
         case 'EXPORT_TABLE': {
           void (async () => {
-            const access = await ensureExportAccess(1);
+            const access = await ensureExportAccess(1, lang);
             if (!access.allowed) {
               sendResponse({ ok: false, reason: access.reason });
               return;
@@ -258,7 +264,7 @@ export default defineContentScript({
               sendResponse({ ok: false, reason: 'table_not_found' });
               return;
             }
-            const access = await ensureExportAccess(tableCount);
+            const access = await ensureExportAccess(tableCount, lang);
             if (!access.allowed) {
               sendResponse({
                 ok: false,
@@ -279,7 +285,7 @@ export default defineContentScript({
 
         case 'COPY_TABLE': {
           void (async () => {
-            const access = await ensureExportAccess(1);
+            const access = await ensureExportAccess(1, lang);
             if (!access.allowed) {
               sendResponse({ ok: false, reason: access.reason });
               return;
@@ -298,7 +304,7 @@ export default defineContentScript({
           void (async () => {
             const { format, tableId, skipAccessCheck } = message.payload ?? {};
             if (!skipAccessCheck) {
-              const access = await ensureExportAccess(1);
+              const access = await ensureExportAccess(1, lang);
               if (!access.allowed) {
                 sendResponse({ ok: false, reason: access.reason });
                 return;

@@ -27,7 +27,7 @@ export type MessageType =
   | { type: 'OPEN_WEBSITE'; payload: { tableId?: string } }
   | { type: 'OPEN_LOGIN'; payload?: never }
   | { type: 'OPEN_REGISTER'; payload?: never }
-  | { type: 'OPEN_PAYMENT_PAGE'; payload?: { planId?: string } }
+  | { type: 'OPEN_PAYMENT_PAGE'; payload?: { planId?: string; lang?: 'zh' | 'en' } }
   | { type: 'GET_STATE'; payload?: never }
   | { type: 'LOGOUT_PLUGIN'; payload?: never }
   | { type: 'CLEAR_PLUGIN_SESSION'; payload?: never };
