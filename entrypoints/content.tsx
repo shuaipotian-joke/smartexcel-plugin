@@ -20,9 +20,10 @@ import '@/assets/styles/tailwind.css';
 type CreditCheckResult = {
   allowed: boolean;
   remaining?: number;
+  unlimited?: boolean;
   isLoggedIn: boolean;
   reason?: string;
-  requiredCredits?: number;
+  required?: number;
 };
 
 type ExportAccessResult = CreditCheckResult & { openedFlow?: 'login' | 'payment' };
@@ -69,9 +70,9 @@ function showPageToast(message: string, duration = 2200) {
   }
 }
 
-async function requestCheckAndConsume(amount = 1): Promise<CreditCheckResult> {
+async function requestExportAccess(amount = 1): Promise<CreditCheckResult> {
   const result = await safeSendRuntimeMessage<CreditCheckResult>({
-    type: 'CHECK_AND_CONSUME',
+    type: 'CHECK_EXPORT_ACCESS',
     payload: { amount },
   });
   return result ?? { allowed: false, reason: 'error', isLoggedIn: false };
@@ -81,7 +82,7 @@ async function ensureExportAccess(
   amount = 1,
   lang = detectBrowserLang()
 ): Promise<ExportAccessResult> {
-  const result = await requestCheckAndConsume(amount);
+  const result = await requestExportAccess(amount);
   if (result.allowed) {
     return result;
   }
@@ -269,7 +270,7 @@ export default defineContentScript({
               sendResponse({
                 ok: false,
                 reason: access.reason,
-                requiredCredits: access.requiredCredits ?? tableCount,
+                required: access.required ?? tableCount,
               });
               return;
             }
@@ -351,11 +352,11 @@ export default defineContentScript({
         }
 
         case 'SHOW_EXPORT_FEEDBACK': {
-          const { format, remaining, used = 1 } = message.payload ?? {};
+          const { format, remaining, unlimited } = message.payload ?? {};
           const fmt = (format ?? 'xlsx').toUpperCase();
           const messageText =
-            remaining !== undefined
-              ? t('exportedWithCreditInfo', lang, { fmt, used, n: remaining })
+            !unlimited && remaining !== undefined
+              ? `${t('exportedAs', lang, { fmt })}${t('trialLeft', lang, { n: remaining })}`
               : t('exportedAs', lang, { fmt });
           showPageToast(messageText);
           sendResponse({ ok: true });

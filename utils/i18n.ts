@@ -14,11 +14,15 @@ const zh = {
   settings: '设置',
   back: '返回',
 
-  // Credit bar
-  creditsRemaining: '剩余 {n} 次',
-  addCredits: '添加次数',
+  // Access bar
   login: '登录',
-  signupBonusHint: '登录后可用，新用户赠送 {n} 点积分',
+  accessUnlocked: '已解锁 · 无限导出',
+  accessMember: '会员期内免费使用',
+  accessTrial: '免费试用剩余 {n} 次导出',
+  accessExhausted: '免费试用已用完',
+  unlockPlugin: '解锁插件',
+  unlockPluginPrice: '解锁插件 ¥9.9',
+  signupBonusHint: '登录后可用，新用户免费试用 {n} 次导出',
 
   // No tables state
   noTablesFound: '当前页面未检测到表格',
@@ -31,9 +35,9 @@ const zh = {
   deselectAll: '取消全选',
   exportAll: '全部导出',
   exportSelected: '导出选中',
-  confirmExportAll: '当前识别到 {count} 个表格，本次会消耗 {credits} 积分，确定继续吗？',
-  insufficientCreditsForAll: '积分不足，本次导出需要 {credits} 积分。',
-  clickToBuyCredits: '点击此处购买积分',
+  confirmExportAll: '当前识别到 {count} 个表格，本次将全部导出，确定继续吗？',
+  paywallHint: '免费试用已用完，解锁插件后即可无限导出。',
+  clickToUnlock: '点击这里解锁插件',
 
   // Table card
   selectTable: '选择表格：{title}',
@@ -47,11 +51,10 @@ const zh = {
   language: '语言',
   languageRegionHint: '默认根据浏览器地区自动显示语言，也可以在这里手动切换。',
   usageStats: '使用统计',
-  creditsBalance: '积分余额',
-  times: '次',
+  pluginStatus: '插件状态',
   notLoggedIn: '未登录',
   createAccount: '注册新账号',
-  createAccountForBonus: '注册领取 {n} 点积分',
+  createAccountForBonus: '注册领取 {n} 次免费导出',
   loggedInAs: '当前账号：{email}',
   logout: '退出登录',
 
@@ -68,10 +71,9 @@ const zh = {
 
   // TableOverlay — toast messages
   exportedAs: '已导出为 {fmt}',
-  exportedWithCreditInfo: '已导出为 {fmt}，已扣除 {used} 积分，剩余 {n} 积分',
-  creditsLeft: '，剩余 {n} 积分',
+  trialLeft: '，免费试用剩余 {n} 次',
   exportingPleaseWait: '请稍等，正在导出…',
-  loginRequiredToExport: '导出前请先登录，新用户赠送 10 点积分',
+  loginRequiredToExport: '导出前请先登录，新用户免费试用 {n} 次导出',
   exportFailed: '导出失败，请重试',
   copiedToClipboard: '已复制到剪贴板',
   copyFailed: '复制失败，请重试',
@@ -85,10 +87,14 @@ const en: Record<TranslationKey, string> = {
   settings: 'Settings',
   back: 'Back',
 
-  creditsRemaining: '{n} credits left',
-  addCredits: 'Add Credits',
   login: 'Login',
-  signupBonusHint: 'Sign in to export. New users get {n} credits',
+  accessUnlocked: 'Unlocked · unlimited exports',
+  accessMember: 'Free with your membership',
+  accessTrial: '{n} free exports left',
+  accessExhausted: 'Free trial used up',
+  unlockPlugin: 'Unlock plugin',
+  unlockPluginPrice: 'Unlock plugin · $5',
+  signupBonusHint: 'Sign in to export. New users get {n} free exports',
 
   noTablesFound: 'No tables found on this page',
   hoverHint: 'Hover over a table to show the export button',
@@ -99,9 +105,9 @@ const en: Record<TranslationKey, string> = {
   deselectAll: 'Deselect all',
   exportAll: 'Export All',
   exportSelected: 'Export selected',
-  confirmExportAll: '{count} tables detected. This export will cost {credits} credits. Continue?',
-  insufficientCreditsForAll: 'Insufficient credits. This export requires {credits} credits.',
-  clickToBuyCredits: 'Click here to buy credits',
+  confirmExportAll: '{count} tables detected. Export all of them now?',
+  paywallHint: 'Free trial used up. Unlock the plugin for unlimited exports.',
+  clickToUnlock: 'Click here to unlock the plugin',
 
   selectTable: 'Select table: {title}',
   exportExcel: 'Export Excel',
@@ -112,11 +118,10 @@ const en: Record<TranslationKey, string> = {
   language: 'Language',
   languageRegionHint: 'The panel follows your browser region by default. You can override it here.',
   usageStats: 'Usage Stats',
-  creditsBalance: 'Credits',
-  times: 'times',
+  pluginStatus: 'Plugin status',
   notLoggedIn: 'Not logged in',
   createAccount: 'Create account',
-  createAccountForBonus: 'Create account and get {n} credits',
+  createAccountForBonus: 'Create account and get {n} free exports',
   loggedInAs: 'Signed in as: {email}',
   logout: 'Log out',
 
@@ -131,10 +136,9 @@ const en: Record<TranslationKey, string> = {
   aiProcess: 'AI Processing',
 
   exportedAs: 'Exported as {fmt}',
-  exportedWithCreditInfo: 'Exported as {fmt}. {used} credit deducted, {n} credits left',
-  creditsLeft: ', {n} credits left',
+  trialLeft: ', {n} free exports left',
   exportingPleaseWait: 'Please wait, exporting...',
-  loginRequiredToExport: 'Please sign in before exporting. New users get 10 credits',
+  loginRequiredToExport: 'Please sign in before exporting. New users get {n} free exports',
   exportFailed: 'Export failed, please retry',
   copiedToClipboard: 'Copied to clipboard',
   copyFailed: 'Copy failed, please retry',

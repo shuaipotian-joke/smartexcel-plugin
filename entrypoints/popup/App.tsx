@@ -12,11 +12,20 @@ import {
 } from 'lucide-react';
 import SettingsPanel from './SettingsPanel';
 
+type PluginAccess = {
+  licensed: boolean;
+  member: boolean;
+  plan: string;
+  trialRemaining: number;
+  trialLimit: number;
+  allowed: boolean;
+};
+
 type CreditState = {
   credits: number;
   loggedIn: boolean;
-  freeUsed: number;
   freeLimit: number;
+  pluginAccess?: PluginAccess;
   email?: string;
   name?: string;
 };
@@ -51,7 +60,10 @@ export default function App() {
         changes.se_logged_in ||
         changes.se_email ||
         changes.se_name ||
-        changes.se_plugin_token
+        changes.se_plugin_token ||
+        changes.se_plugin_licensed ||
+        changes.se_plugin_member ||
+        changes.se_trial_remaining
       ) {
         void loadCreditState();
       }
@@ -109,12 +121,8 @@ export default function App() {
       return;
     }
 
-    const requiredCredits = targetIds.length;
     const confirmed = window.confirm(
-      t('confirmExportAll', lang, {
-        count: targetIds.length,
-        credits: requiredCredits,
-      }),
+      t('confirmExportAll', lang, { count: targetIds.length }),
     );
 
     if (!confirmed) {
@@ -133,11 +141,9 @@ export default function App() {
         type: 'EXPORT_ALL',
         payload: { tableIds: targetIds },
       });
-      if (!result?.ok && result?.reason === 'no_credits') {
+      if (!result?.ok && result?.reason === 'payment_required') {
         setActionMessage({
-          text: t('insufficientCreditsForAll', lang, {
-            credits: result.requiredCredits ?? requiredCredits,
-          }),
+          text: t('paywallHint', lang),
           showBuy: true,
         });
       }
@@ -160,7 +166,7 @@ export default function App() {
     );
   }, []);
 
-  const handleAddCredits = useCallback(() => {
+  const handleUnlock = useCallback(() => {
     browser.runtime.sendMessage({
       type: 'OPEN_PAYMENT_PAGE',
       payload: { lang },
@@ -180,13 +186,22 @@ export default function App() {
     await loadCreditState();
   }, []);
 
-  const getRemainingText = () => {
+  const access = creditState?.pluginAccess;
+
+  const getAccessText = () => {
     if (!creditState) return '';
-    if (creditState.loggedIn) {
-      return t('creditsRemaining', lang, { n: creditState.credits });
+    if (!creditState.loggedIn) {
+      return t('signupBonusHint', lang, { n: creditState.freeLimit });
     }
-    return t('signupBonusHint', lang, { n: creditState.freeLimit });
+    if (access?.licensed) return t('accessUnlocked', lang);
+    if (access?.member) return t('accessMember', lang);
+    if ((access?.trialRemaining ?? 0) > 0) {
+      return t('accessTrial', lang, { n: access?.trialRemaining ?? 0 });
+    }
+    return t('accessExhausted', lang);
   };
+
+  const unlocked = Boolean(access?.licensed || access?.member);
 
   if (showSettings) {
     return (
@@ -234,15 +249,25 @@ export default function App() {
               <Sparkles className="h-3.5 w-3.5" />
             </span>
             <span className="truncate text-xs font-medium text-[#305246]">
-              {getRemainingText()}
+              {getAccessText()}
             </span>
           </div>
-          <button
-            className="shrink-0 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-brand-700"
-            onClick={creditState.loggedIn ? handleAddCredits : handleLogin}
-          >
-            {creditState.loggedIn ? t('addCredits', lang) : t('login', lang)}
-          </button>
+          {creditState.loggedIn && unlocked ? (
+            <span className="shrink-0 rounded-lg bg-brand-50 px-3 py-1.5 text-xs font-medium text-brand-700">
+              {access?.licensed
+                ? t('accessUnlocked', lang)
+                : t('accessMember', lang)}
+            </span>
+          ) : (
+            <button
+              className="shrink-0 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-brand-700"
+              onClick={creditState.loggedIn ? handleUnlock : handleLogin}
+            >
+              {creditState.loggedIn
+                ? t('unlockPluginPrice', lang)
+                : t('login', lang)}
+            </button>
+          )}
         </div>
       )}
 
@@ -252,9 +277,9 @@ export default function App() {
           {actionMessage.showBuy && (
             <button
               className="font-medium underline underline-offset-2"
-              onClick={handleAddCredits}
+              onClick={handleUnlock}
             >
-              {t('clickToBuyCredits', lang)}
+              {t('clickToUnlock', lang)}
             </button>
           )}
         </div>

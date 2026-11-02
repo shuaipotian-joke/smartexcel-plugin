@@ -20,13 +20,15 @@ import { Check, ChevronDown, FileSpreadsheet, Table2 } from 'lucide-react';
 type CreditCheckResult = {
   allowed: boolean;
   remaining?: number;
+  unlimited?: boolean;
   isLoggedIn: boolean;
   reason?: string;
 };
 
-async function requestCheckAndConsume(): Promise<CreditCheckResult> {
+async function requestExportAccess(): Promise<CreditCheckResult> {
   const result = await safeSendRuntimeMessage<CreditCheckResult>({
-    type: 'CHECK_AND_CONSUME',
+    type: 'CHECK_EXPORT_ACCESS',
+    payload: { amount: 1 },
   });
   return result ?? { allowed: false, reason: 'error', isLoggedIn: false };
 }
@@ -214,8 +216,8 @@ export default function TableOverlay() {
       }
       setMenuOpen(false);
 
-      // 向后台请求积分检查并扣除
-      const result = await requestCheckAndConsume();
+      // Ask the background worker whether this export is allowed
+      const result = await requestExportAccess();
 
       if (!result.allowed) {
         if (result.reason === 'not_logged_in') {
@@ -231,9 +233,10 @@ export default function TableOverlay() {
       try {
         exportToExcel(fab.table, { format, withIndex: false });
         const fmt = format.toUpperCase();
-        const hint = result.remaining !== undefined
-          ? t('creditsLeft', lang, { n: result.remaining })
-          : '';
+        const hint =
+          !result.unlimited && result.remaining !== undefined
+            ? t('trialLeft', lang, { n: result.remaining })
+            : '';
         showToast(t('exportedAs', lang, { fmt }) + hint);
       } catch {
         showToast(t('exportFailed', lang));

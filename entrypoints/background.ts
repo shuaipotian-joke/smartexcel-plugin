@@ -2,7 +2,7 @@ const SMARTEXCEL_URL =
   import.meta.env.WXT_SMARTEXCEL_URL || 'http://localhost:3000';
 const PLUGIN_BRIDGE_URL = `${SMARTEXCEL_URL}/plugin-auth/bridge`;
 const PLUGIN_ME_URL = `${SMARTEXCEL_URL}/api/plugin/auth/me`;
-const PLUGIN_CONSUME_URL = `${SMARTEXCEL_URL}/api/plugin/consume`;
+const PLUGIN_ACCESS_URL = `${SMARTEXCEL_URL}/api/plugin/access`;
 const PLUGIN_CREATE_LOGIN_TICKET_URL = `${SMARTEXCEL_URL}/api/plugin/auth/create-login-ticket`;
 const PLUGIN_REVOKE_URL = `${SMARTEXCEL_URL}/api/plugin/auth/revoke`;
 const CONTENT_SCRIPT_PATH = 'content-scripts/content.js';
@@ -10,6 +10,63 @@ const CONTEXT_MENU_ROOT_ID = 'smartexcel-context-root';
 const CONTEXT_MENU_EXPORT_XLSX_ID = 'smartexcel-context-export-xlsx';
 const CONTEXT_MENU_EXPORT_CSV_ID = 'smartexcel-context-export-csv';
 const NEW_USER_BONUS_CREDITS = 10;
+
+type PluginAccess = {
+  licensed: boolean;
+  member: boolean;
+  plan: string;
+  trialRemaining: number;
+  trialLimit: number;
+  allowed: boolean;
+};
+
+const EMPTY_ACCESS: PluginAccess = {
+  licensed: false,
+  member: false,
+  plan: 'free',
+  trialRemaining: 0,
+  trialLimit: NEW_USER_BONUS_CREDITS,
+  allowed: false,
+};
+
+function normalizeAccess(input: any): PluginAccess {
+  const source = input?.pluginAccess ?? input ?? {};
+  const trialLimit = Number(source.trialLimit ?? NEW_USER_BONUS_CREDITS);
+  const trialRemaining = Math.max(
+    0,
+    Math.min(Number(source.trialRemaining ?? 0), trialLimit)
+  );
+  const licensed = Boolean(source.licensed);
+  const member = Boolean(source.member);
+  return {
+    licensed,
+    member,
+    plan: String(source.plan ?? (member ? 'pro' : 'free')),
+    trialRemaining,
+    trialLimit,
+    allowed: licensed || member || trialRemaining > 0,
+  };
+}
+
+async function storeAccess(access: PluginAccess) {
+  await browser.storage.local.set({
+    se_plugin_licensed: access.licensed,
+    se_plugin_member: access.member,
+    se_plugin_plan: access.plan,
+    se_trial_remaining: access.trialRemaining,
+    se_trial_limit: access.trialLimit,
+  });
+}
+
+function readStoredAccess(result: Record<string, unknown>): PluginAccess {
+  return normalizeAccess({
+    licensed: result.se_plugin_licensed,
+    member: result.se_plugin_member,
+    plan: result.se_plugin_plan,
+    trialRemaining: result.se_trial_remaining,
+    trialLimit: result.se_trial_limit ?? NEW_USER_BONUS_CREDITS,
+  });
+}
 type ContextMenuState = {
   tableId: string | null;
   frameId?: number;
@@ -58,18 +115,16 @@ function buildBridgeUrl(options?: {
   return bridgeUrl.toString();
 }
 
-function buildPaymentRedirectPath(planId?: string, lang?: 'zh' | 'en') {
-  const path = lang === 'zh' ? '/zh/pricing' : '/pricing';
+/**
+ * The plugin is a one-time purchase, so the payment page is the dedicated
+ * plugin-payment page (not the website credit packs).
+ */
+function buildPaymentRedirectPath(lang?: 'zh' | 'en') {
+  const path = lang === 'zh' ? '/zh/plugin-payment' : '/plugin-payment';
   const url = new URL(path, SMARTEXCEL_URL);
   url.searchParams.set('source', 'extension');
-
-  if (planId) {
-    url.searchParams.set('planId', planId);
-  }
-
-  url.hash = 'credit-pack';
-
-  return `${url.pathname}${url.search}${url.hash}`;
+  url.searchParams.set('closeAfterPayment', 'true');
+  return `${url.pathname}${url.search}`;
 }
 
 function buildWebsiteRedirectPath(tableId?: string) {
@@ -89,6 +144,11 @@ async function getStoredPluginSession() {
     'se_email',
     'se_name',
     'se_user_id',
+    'se_plugin_licensed',
+    'se_plugin_member',
+    'se_plugin_plan',
+    'se_trial_remaining',
+    'se_trial_limit',
   ]);
 
   return {
@@ -99,6 +159,7 @@ async function getStoredPluginSession() {
     email: (result.se_email as string) || '',
     name: (result.se_name as string) || '',
     userId: (result.se_user_id as string) || '',
+    access: readStoredAccess(result as Record<string, unknown>),
   };
 }
 
@@ -111,6 +172,11 @@ async function clearPluginSession() {
     'se_email',
     'se_name',
     'se_user_id',
+    'se_plugin_licensed',
+    'se_plugin_member',
+    'se_plugin_plan',
+    'se_trial_remaining',
+    'se_trial_limit',
   ]);
 }
 
@@ -162,6 +228,7 @@ async function refreshPluginState() {
       name: '',
       userId: '',
       tokenExpiresAt: '',
+      pluginAccess: EMPTY_ACCESS,
     };
   }
 
@@ -176,9 +243,12 @@ async function refreshPluginState() {
         name: '',
         userId: '',
         tokenExpiresAt: '',
+        pluginAccess: EMPTY_ACCESS,
       };
     }
 
+    const pluginAccess = normalizeAccess(data);
+    await storeAccess(pluginAccess);
     await browser.storage.local.set({
       se_logged_in: true,
       se_credits: data.credits ?? 0,
@@ -195,6 +265,7 @@ async function refreshPluginState() {
       name: data.name ?? '',
       userId: data.userId ?? '',
       tokenExpiresAt: data.tokenExpiresAt ?? stored.tokenExpiresAt,
+      pluginAccess,
     };
   } catch (error) {
     console.error('refresh plugin state failed:', error);
@@ -205,6 +276,7 @@ async function refreshPluginState() {
       name: stored.name,
       userId: stored.userId,
       tokenExpiresAt: stored.tokenExpiresAt,
+      pluginAccess: stored.access,
     };
   }
 }
@@ -255,8 +327,8 @@ async function openWebsiteWithPluginLogin(
   await browser.tabs.create({ url: fallbackUrl });
 }
 
-async function consumeLoggedInCredit(token: string, amount: number) {
-  const response = await fetch(PLUGIN_CONSUME_URL, {
+async function requestPluginAccess(token: string, amount: number) {
+  const response = await fetch(PLUGIN_ACCESS_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -271,7 +343,7 @@ async function consumeLoggedInCredit(token: string, amount: number) {
   }
 
   if (!response.ok) {
-    throw new Error(`plugin consume failed: ${response.status}`);
+    throw new Error(`plugin access failed: ${response.status}`);
   }
 
   return response.json();
@@ -359,14 +431,19 @@ function updateContextMenuVisibility(state?: ContextMenuState) {
 }
 
 /**
- * Check if user can export and consume one credit.
+ * Check whether the plugin may export right now.
+ *
+ * Access comes from the one-time plugin license or an active website
+ * membership. Credits belong to a separate system and are never spent here.
  */
-async function checkAndConsume(amount = 1): Promise<{
+async function checkExportAccess(amount = 1): Promise<{
   allowed: boolean;
   remaining?: number;
   isLoggedIn: boolean;
   reason?: string;
-  requiredCredits?: number;
+  required?: number;
+  unlimited?: boolean;
+  pluginAccess: PluginAccess;
 }> {
   const normalizedAmount = Number.isFinite(amount)
     ? Math.max(1, Math.floor(amount))
@@ -374,52 +451,76 @@ async function checkAndConsume(amount = 1): Promise<{
   const stored = await getStoredPluginSession();
 
   if (!stored.token) {
-    return { allowed: false, reason: 'not_logged_in', isLoggedIn: false };
+    return {
+      allowed: false,
+      reason: 'not_logged_in',
+      isLoggedIn: false,
+      pluginAccess: EMPTY_ACCESS,
+    };
   }
 
   try {
-    const result = await consumeLoggedInCredit(stored.token, normalizedAmount);
-    if (result?.success) {
-      await browser.storage.local.set({
-        se_logged_in: true,
-        se_credits: result.remaining ?? 0,
-      });
+    const result = await requestPluginAccess(stored.token, normalizedAmount);
+    if (result == null) {
       return {
-        allowed: true,
-        remaining: result.remaining ?? 0,
-        isLoggedIn: true,
+        allowed: false,
+        reason: 'not_logged_in',
+        isLoggedIn: false,
+        pluginAccess: EMPTY_ACCESS,
       };
     }
 
-    if (result == null) {
-      return { allowed: false, reason: 'not_logged_in', isLoggedIn: false };
+    const pluginAccess = normalizeAccess(result);
+    await browser.storage.local.set({ se_logged_in: true });
+    await storeAccess(pluginAccess);
+
+    if (!result.accessAllowed) {
+      return {
+        allowed: false,
+        reason: result.reason ?? 'payment_required',
+        isLoggedIn: true,
+        required: result.required ?? normalizedAmount,
+        pluginAccess,
+      };
     }
 
     return {
-      allowed: false,
-      reason:
-        result.error === 'insufficient_credits' ? 'no_credits' : 'internal_error',
+      allowed: true,
+      remaining: pluginAccess.trialRemaining,
+      unlimited:
+        Boolean(result.unlimited) ||
+        pluginAccess.licensed ||
+        pluginAccess.member,
       isLoggedIn: true,
-      requiredCredits: result.required ?? normalizedAmount,
+      pluginAccess,
     };
   } catch (error) {
-    console.error('logged-in consume failed:', error);
-    return { allowed: false, reason: 'internal_error', isLoggedIn: true };
+    console.error('plugin access request failed:', error);
+    return {
+      allowed: false,
+      reason: 'internal_error',
+      isLoggedIn: true,
+      pluginAccess: stored.access,
+    };
   }
 }
 
-async function syncCredits(data: {
-  credits: number;
+async function syncPluginState(data: {
+  credits?: number;
   loggedIn: boolean;
   email?: string;
   name?: string;
+  pluginAccess?: PluginAccess;
 }): Promise<void> {
   await browser.storage.local.set({
-    se_credits: data.credits,
+    se_credits: data.credits ?? 0,
     se_logged_in: data.loggedIn,
     se_email: data.email ?? '',
     se_name: data.name ?? '',
   });
+  if (data.pluginAccess) {
+    await storeAccess(normalizeAccess(data.pluginAccess));
+  }
 }
 
 async function syncPluginAuth(data: {
@@ -439,6 +540,7 @@ async function syncPluginAuth(data: {
       return;
     }
 
+    await storeAccess(normalizeAccess(me));
     await browser.storage.local.set({
       se_logged_in: true,
       se_credits: me.credits ?? data.credits ?? 0,
@@ -521,6 +623,7 @@ async function notifyContextExportFeedback(
   tabId: number,
   format: 'xlsx' | 'csv',
   remaining?: number,
+  unlimited?: boolean,
   frameId?: number,
 ): Promise<void> {
   try {
@@ -531,7 +634,7 @@ async function notifyContextExportFeedback(
         payload: {
           format,
           remaining,
-          used: 1,
+          unlimited: Boolean(unlimited),
         },
       },
       frameId != null ? { frameId } : undefined,
@@ -561,7 +664,7 @@ async function notifyContextExportProgress(
 
 async function continuePendingContextExport(
   pending: PendingContextExport,
-): Promise<number | undefined> {
+): Promise<{ remaining?: number; unlimited?: boolean } | undefined> {
   const stored = await getStoredPluginSession();
   if (!stored.token) {
     pendingContextExport = pending;
@@ -578,7 +681,7 @@ async function continuePendingContextExport(
     pending.frameId,
   );
 
-  const access = await checkAndConsume(1);
+  const access = await checkExportAccess(1);
 
   if (!access.allowed) {
     if (access.reason === 'not_logged_in') {
@@ -600,7 +703,10 @@ async function continuePendingContextExport(
   }
 
   await downloadPreparedContextExport(preparedFile);
-  return access.remaining;
+  return {
+    remaining: access.remaining,
+    unlimited: access.unlimited,
+  };
 }
 
 // ─── Main background entry ─────────────────────────────────────────────────
@@ -669,14 +775,12 @@ export default defineBackground(() => {
     }
 
     if (message.type === 'OPEN_PAYMENT_PAGE') {
-      const planId = message.payload?.planId;
       const lang = message.payload?.lang === 'zh' ? 'zh' : 'en';
-      const redirectTo = buildPaymentRedirectPath(planId, lang);
+      const redirectTo = buildPaymentRedirectPath(lang);
       openWebsiteWithPluginLogin(
         redirectTo,
         buildBridgeUrl({
           authMode: 'register',
-          planId,
           redirectTo,
         })
       )
@@ -688,15 +792,15 @@ export default defineBackground(() => {
       return true;
     }
 
-    // Check and consume one export credit (async)
-    if (message.type === 'CHECK_AND_CONSUME') {
-      checkAndConsume(message.payload?.amount).then(sendResponse);
+    // Check plugin access (license / membership / free trial)
+    if (message.type === 'CHECK_EXPORT_ACCESS') {
+      checkExportAccess(message.payload?.amount).then(sendResponse);
       return true; // keep channel open for async response
     }
 
-    // Sync credits from website payment pages via postMessage relay
+    // Sync plugin access from website payment pages via postMessage relay
     if (message.type === 'PLUGIN_SYNC') {
-      syncCredits(message.data).then(() => sendResponse({ ok: true }));
+      syncPluginState(message.data).then(() => sendResponse({ ok: true }));
       return true;
     }
 
@@ -746,10 +850,14 @@ export default defineBackground(() => {
       return true;
     }
 
-    // Get current credit state (for popup display)
+    // Get current plugin state (for popup display)
     if (message.type === 'GET_STATE') {
       refreshPluginState().then(async (state) => {
-        sendResponse({ ...state, freeUsed: 0, freeLimit: NEW_USER_BONUS_CREDITS });
+        sendResponse({
+          ...state,
+          pluginAccess: state.pluginAccess ?? EMPTY_ACCESS,
+          freeLimit: NEW_USER_BONUS_CREDITS,
+        });
       });
       return true;
     }
@@ -809,9 +917,15 @@ export default defineBackground(() => {
         format,
       };
       await notifyContextExportProgress(tab.id, frameId);
-      const remaining = await continuePendingContextExport(pendingContextExport);
-      if (remaining !== undefined) {
-        await notifyContextExportFeedback(tab.id, format, remaining, frameId);
+      const feedback = await continuePendingContextExport(pendingContextExport);
+      if (feedback !== undefined) {
+        await notifyContextExportFeedback(
+          tab.id,
+          format,
+          feedback.remaining,
+          feedback.unlimited,
+          frameId,
+        );
       }
       updateContextMenuVisibility(undefined);
     } catch (error) {

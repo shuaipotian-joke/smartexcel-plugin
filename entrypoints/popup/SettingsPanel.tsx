@@ -1,11 +1,20 @@
 import { t, LANG_LABELS, SUPPORTED_LANGS, type Lang } from '@/utils/i18n';
 import { ArrowLeft, Check, Globe2, LogIn, UserRound } from 'lucide-react';
 
+interface PluginAccess {
+  licensed: boolean;
+  member: boolean;
+  plan: string;
+  trialRemaining: number;
+  trialLimit: number;
+  allowed: boolean;
+}
+
 interface CreditState {
   credits: number;
   loggedIn: boolean;
-  freeUsed: number;
   freeLimit: number;
+  pluginAccess?: PluginAccess;
   email?: string;
   name?: string;
 }
@@ -87,10 +96,18 @@ export default function SettingsPanel({
               <>
                 {creditState.loggedIn ? (
                   <>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-[#557064]">{t('creditsBalance', lang)}</span>
-                      <span className="rounded-lg bg-brand-50 px-2 py-1 text-sm font-semibold text-brand-700">
-                        {creditState.credits} {t('times', lang)}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="shrink-0 text-sm text-[#557064]">{t('pluginStatus', lang)}</span>
+                      <span className="min-w-0 break-words text-right rounded-lg bg-brand-50 px-2 py-1 text-xs font-semibold text-brand-700">
+                        {creditState.pluginAccess?.licensed
+                          ? t('accessUnlocked', lang)
+                          : creditState.pluginAccess?.member
+                            ? t('accessMember', lang)
+                            : (creditState.pluginAccess?.trialRemaining ?? 0) > 0
+                              ? t('accessTrial', lang, {
+                                  n: creditState.pluginAccess?.trialRemaining ?? 0,
+                                })
+                              : t('accessExhausted', lang)}
                       </span>
                     </div>
                     <div className="space-y-2 pt-1">
