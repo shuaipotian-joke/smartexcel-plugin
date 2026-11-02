@@ -70,10 +70,13 @@ function showPageToast(message: string, duration = 2200) {
   }
 }
 
-async function requestExportAccess(amount = 1): Promise<CreditCheckResult> {
+async function requestExportAccess(
+  amount = 1,
+  lang?: 'zh' | 'en'
+): Promise<CreditCheckResult> {
   const result = await safeSendRuntimeMessage<CreditCheckResult>({
     type: 'CHECK_EXPORT_ACCESS',
-    payload: { amount },
+    payload: { amount, lang },
   });
   return result ?? { allowed: false, reason: 'error', isLoggedIn: false };
 }
@@ -82,7 +85,7 @@ async function ensureExportAccess(
   amount = 1,
   lang = detectBrowserLang()
 ): Promise<ExportAccessResult> {
-  const result = await requestExportAccess(amount);
+  const result = await requestExportAccess(amount, lang);
   if (result.allowed) {
     return result;
   }

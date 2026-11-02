@@ -1,4 +1,5 @@
 import { t, LANG_LABELS, SUPPORTED_LANGS, type Lang } from '@/utils/i18n';
+import { TRIAL_EXPORTS } from '@/utils/constants';
 import { ArrowLeft, Check, Globe2, LogIn, UserRound } from 'lucide-react';
 
 interface PluginAccess {
@@ -127,7 +128,7 @@ export default function SettingsPanel({
                 ) : (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-[#557064]">{t('loginRequiredToExport', lang)}</span>
+                      <span className="text-sm text-[#557064]">{t('loginRequiredToExport', lang, { n: TRIAL_EXPORTS })}</span>
                       <button
                         onClick={onLogin}
                         className="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-brand-700"

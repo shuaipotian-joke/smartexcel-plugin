@@ -2,7 +2,7 @@
 
 SmartExcel Plugin is an open-source browser extension that detects HTML tables on web pages and exports them to Excel-compatible files.
 
-It is designed as the browser-extension companion to the SmartExcel website, which handles plugin login, the one-time plugin license, and access sync. The plugin is sold once — ¥9.9 CNY via XorPay or $5 USD via Stripe depending on the user's language — and it is billed separately from the website credit system. Website members (`pro` / `max`) use the plugin free while their membership is active, and every logged-in account starts with 10 free trial exports.
+It is designed as the browser-extension companion to the SmartExcel website, which handles plugin login, the one-time plugin license, and access sync. The plugin is sold once — ¥9.9 CNY via XorPay or $5 USD via Stripe depending on the user's language — and it is billed separately from the website credit system. Website members (`pro` / `max`) use the plugin free while their membership is active, and every logged-in account starts with 5 free trial exports (after that the unlock page opens automatically).
 
 ## What It Does
 

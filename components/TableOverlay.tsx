@@ -15,6 +15,7 @@ import {
 import { exportToExcel } from '@/utils/excel-export';
 import { useExtensionStore } from '@/utils/store';
 import { t, type Lang } from '@/utils/i18n';
+import { TRIAL_EXPORTS } from '@/utils/constants';
 import { Check, ChevronDown, FileSpreadsheet, Table2 } from 'lucide-react';
 
 type CreditCheckResult = {
@@ -25,10 +26,10 @@ type CreditCheckResult = {
   reason?: string;
 };
 
-async function requestExportAccess(): Promise<CreditCheckResult> {
+async function requestExportAccess(lang: Lang): Promise<CreditCheckResult> {
   const result = await safeSendRuntimeMessage<CreditCheckResult>({
     type: 'CHECK_EXPORT_ACCESS',
-    payload: { amount: 1 },
+    payload: { amount: 1, lang },
   });
   return result ?? { allowed: false, reason: 'error', isLoggedIn: false };
 }
@@ -217,11 +218,11 @@ export default function TableOverlay() {
       setMenuOpen(false);
 
       // Ask the background worker whether this export is allowed
-      const result = await requestExportAccess();
+      const result = await requestExportAccess(lang);
 
       if (!result.allowed) {
         if (result.reason === 'not_logged_in') {
-          showToast(t('loginRequiredToExport', lang));
+          showToast(t('loginRequiredToExport', lang, { n: TRIAL_EXPORTS }));
           openLoginPage();
           return;
         }

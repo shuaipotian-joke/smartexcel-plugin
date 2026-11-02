@@ -1,3 +1,5 @@
+import { TRIAL_EXPORTS } from '@/utils/constants';
+
 const SMARTEXCEL_URL =
   import.meta.env.WXT_SMARTEXCEL_URL || 'http://localhost:3000';
 const PLUGIN_BRIDGE_URL = `${SMARTEXCEL_URL}/plugin-auth/bridge`;
@@ -9,7 +11,7 @@ const CONTENT_SCRIPT_PATH = 'content-scripts/content.js';
 const CONTEXT_MENU_ROOT_ID = 'smartexcel-context-root';
 const CONTEXT_MENU_EXPORT_XLSX_ID = 'smartexcel-context-export-xlsx';
 const CONTEXT_MENU_EXPORT_CSV_ID = 'smartexcel-context-export-csv';
-const NEW_USER_BONUS_CREDITS = 10;
+const PLUGIN_TRIAL_EXPORTS = TRIAL_EXPORTS;
 
 type PluginAccess = {
   licensed: boolean;
@@ -25,13 +27,13 @@ const EMPTY_ACCESS: PluginAccess = {
   member: false,
   plan: 'free',
   trialRemaining: 0,
-  trialLimit: NEW_USER_BONUS_CREDITS,
+  trialLimit: PLUGIN_TRIAL_EXPORTS,
   allowed: false,
 };
 
 function normalizeAccess(input: any): PluginAccess {
   const source = input?.pluginAccess ?? input ?? {};
-  const trialLimit = Number(source.trialLimit ?? NEW_USER_BONUS_CREDITS);
+  const trialLimit = Number(source.trialLimit ?? PLUGIN_TRIAL_EXPORTS);
   const trialRemaining = Math.max(
     0,
     Math.min(Number(source.trialRemaining ?? 0), trialLimit)
@@ -64,7 +66,7 @@ function readStoredAccess(result: Record<string, unknown>): PluginAccess {
     member: result.se_plugin_member,
     plan: result.se_plugin_plan,
     trialRemaining: result.se_trial_remaining,
-    trialLimit: result.se_trial_limit ?? NEW_USER_BONUS_CREDITS,
+    trialLimit: result.se_trial_limit ?? PLUGIN_TRIAL_EXPORTS,
   });
 }
 type ContextMenuState = {
@@ -125,6 +127,19 @@ function buildPaymentRedirectPath(lang?: 'zh' | 'en') {
   url.searchParams.set('source', 'extension');
   url.searchParams.set('closeAfterPayment', 'true');
   return `${url.pathname}${url.search}`;
+}
+
+async function openPluginPaymentPage(lang?: 'zh' | 'en') {
+  let targetLang = lang;
+  if (!targetLang) {
+    const stored = await browser.storage.local.get('se_lang');
+    targetLang = stored.se_lang === 'zh' ? 'zh' : 'en';
+  }
+  const redirectTo = buildPaymentRedirectPath(targetLang);
+  await openWebsiteWithPluginLogin(
+    redirectTo,
+    buildBridgeUrl({ authMode: 'register', redirectTo })
+  );
 }
 
 function buildWebsiteRedirectPath(tableId?: string) {
@@ -436,7 +451,10 @@ function updateContextMenuVisibility(state?: ContextMenuState) {
  * Access comes from the one-time plugin license or an active website
  * membership. Credits belong to a separate system and are never spent here.
  */
-async function checkExportAccess(amount = 1): Promise<{
+async function checkExportAccess(
+  amount = 1,
+  lang?: 'zh' | 'en'
+): Promise<{
   allowed: boolean;
   remaining?: number;
   isLoggedIn: boolean;
@@ -484,13 +502,20 @@ async function checkExportAccess(amount = 1): Promise<{
       };
     }
 
+    const unlimited =
+      Boolean(result.unlimited) || pluginAccess.licensed || pluginAccess.member;
+
+    // The free trial just ran out on this export: open the unlock page once.
+    if (!unlimited && pluginAccess.trialRemaining === 0) {
+      void openPluginPaymentPage(lang).catch((error) => {
+        console.error('open payment page after trial failed:', error);
+      });
+    }
+
     return {
       allowed: true,
       remaining: pluginAccess.trialRemaining,
-      unlimited:
-        Boolean(result.unlimited) ||
-        pluginAccess.licensed ||
-        pluginAccess.member,
+      unlimited,
       isLoggedIn: true,
       pluginAccess,
     };
@@ -776,14 +801,7 @@ export default defineBackground(() => {
 
     if (message.type === 'OPEN_PAYMENT_PAGE') {
       const lang = message.payload?.lang === 'zh' ? 'zh' : 'en';
-      const redirectTo = buildPaymentRedirectPath(lang);
-      openWebsiteWithPluginLogin(
-        redirectTo,
-        buildBridgeUrl({
-          authMode: 'register',
-          redirectTo,
-        })
-      )
+      openPluginPaymentPage(lang)
         .then(() => sendResponse({ ok: true }))
         .catch((error) => {
           console.error('open payment page failed:', error);
@@ -794,7 +812,10 @@ export default defineBackground(() => {
 
     // Check plugin access (license / membership / free trial)
     if (message.type === 'CHECK_EXPORT_ACCESS') {
-      checkExportAccess(message.payload?.amount).then(sendResponse);
+      checkExportAccess(
+        message.payload?.amount,
+        message.payload?.lang === 'zh' ? 'zh' : 'en'
+      ).then(sendResponse);
       return true; // keep channel open for async response
     }
 
@@ -856,7 +877,7 @@ export default defineBackground(() => {
         sendResponse({
           ...state,
           pluginAccess: state.pluginAccess ?? EMPTY_ACCESS,
-          freeLimit: NEW_USER_BONUS_CREDITS,
+          freeLimit: PLUGIN_TRIAL_EXPORTS,
         });
       });
       return true;

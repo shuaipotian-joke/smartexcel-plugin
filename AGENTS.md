@@ -9,7 +9,7 @@ Plugin commercial model (keep both repos consistent):
 - The plugin is sold as a **one-time license**, charged separately from the website credit system: ¥9.9 CNY through XorPay for the Chinese market, $5 USD through Stripe for the international market.
 - Buying the plugin never grants credits, and exports never spend credits.
 - Website members (`pro` / `max` subscription) can use the plugin free while the membership is active.
-- Every logged-in account gets 10 free trial exports; the counter is tracked server-side (`plugin_entitlement.trial_used`).
+- Every logged-in account gets 5 free trial exports (`utils/constants.ts` → `TRIAL_EXPORTS`); the counter is tracked server-side (`plugin_entitlement.trial_used`). When the trial runs out the extension opens the payment page automatically.
 
 The website is now a single Next.js full-stack app. Plugin-facing website APIs live under `/api/plugin/*`; do not reintroduce old `/v1/plugin/*` calls. The extension's production `.env.local` points `WXT_SMARTEXCEL_URL` at `https://smarterexcel.com`.
 
@@ -65,7 +65,7 @@ The website is now a single Next.js full-stack app. Plugin-facing website APIs l
 - The main background message types include opening the website, opening the payment page, checking export access (`CHECK_EXPORT_ACCESS`), syncing from the website, and reporting extension state.
 - The extension stores important local state in `browser.storage.local`, including `se_plugin_licensed`, `se_plugin_member`, `se_trial_remaining`, logged-in state, and user identity. `se_credits` is mirrored for reference only and is not spent by exports.
 - Payment completion on the website syncs access state back into the extension through the `SE_PLUGIN_SYNC` postMessage bridge. Changes around the license or payment must preserve that bridge.
-- The plugin trial is 10 free exports (`PLUGIN_TRIAL_EXPORTS` on the website, `NEW_USER_BONUS_CREDITS` in the extension). Keep popup, settings, and in-page login-required text consistent if this number changes.
+- The plugin trial is 5 free exports (`PLUGIN_TRIAL_EXPORTS` on the website, `TRIAL_EXPORTS` in the extension). Keep popup, settings, and in-page login-required text consistent if this number changes.
 
 ## Website Integration Notes
 
