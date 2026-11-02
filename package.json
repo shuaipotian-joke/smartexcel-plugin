@@ -2,7 +2,7 @@
   "name": "smartexcel-plugin",
   "description": "Smart browser extension to detect and export HTML tables to Excel",
   "private": true,
-  "version": "0.1.5",
+  "version": "0.1.6",
   "license": "MIT",
   "repository": {
     "type": "git",
