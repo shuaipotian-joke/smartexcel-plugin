@@ -33,10 +33,25 @@ export type TabMessage =
 export type RuntimeMessage =
   | { type: 'SET_CONTEXT_TABLE'; payload: { tableId: string | null; isHeaderContext: boolean } }
   | { type: 'CREATE_PAYMENT_QR'; payload: { payType: 'native' | 'alipay' } } // → PaymentQrResult
-  | { type: 'CHECK_PAYMENT_STATUS'; payload?: never } // → { activated: boolean }
   | { type: 'CHECK_EXPORT_ACCESS'; payload?: never } // → ExportAccessResult
   | { type: 'ACTIVATE'; payload: { code: string } } // → ActivateResult
   | { type: 'GET_STATE'; payload?: never }; // → ActivationState | null
+
+/**
+ * `runtime.connect` port held open while a payment QR shows (popup or
+ * in-page card). Page → background: WATCH an order (replaces the previous
+ * one), IDLE (no QR right now), PING (every ~20 s, keeps the service worker
+ * alive during a held request). Background → page: PAID or EXPIRED (the order
+ * needs a new QR). Disconnecting stops the wait.
+ */
+export const PAYMENT_WAIT_PORT = 'payment-wait';
+
+export type PaymentWaitPortMessage =
+  | { type: 'WATCH'; orderId: string }
+  | { type: 'IDLE' }
+  | { type: 'PING' };
+
+export type PaymentWaitPortEvent = { type: 'PAID' | 'EXPIRED'; orderId: string };
 
 /** Content-script results of EXPORT_TABLE / EXPORT_ALL / COPY_TABLE. */
 export type ExportResult = { ok: boolean; reason?: string };

@@ -3,15 +3,16 @@ import type { CSSProperties } from 'react';
 import { encode } from 'uqr';
 import { t, type Lang, type TranslationKey } from '@/utils/i18n';
 import { theme } from '@/utils/theme';
-import { usePaymentQr } from '@/utils/use-payment-qr';
-import type { PaymentPayType, PaymentQrError } from '@/utils/activation';
+import { usePaymentQr, type PaymentQrPanelError } from '@/utils/use-payment-qr';
+import type { PaymentPayType } from '@/utils/activation';
 
 const QR_SIZE = 176;
 
-const ERROR_KEYS: Record<PaymentQrError, TranslationKey> = {
+const ERROR_KEYS: Record<PaymentQrPanelError, TranslationKey> = {
   network_error: 'payErrNetwork',
   server_error: 'payErrServer',
   rate_limited: 'payErrRateLimited',
+  expired: 'payErrExpired',
 };
 
 /** The QR drawn locally from the raw XorPay string: one SVG path, no image. */

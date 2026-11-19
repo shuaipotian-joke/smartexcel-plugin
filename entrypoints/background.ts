@@ -5,8 +5,13 @@ import {
   getActivationState,
   getDeviceId,
   refreshActivationIfStale,
+  waitForPayment,
 } from '@/utils/activation';
-import type { ExportAccessResult } from '@/utils/messaging';
+import {
+  PAYMENT_WAIT_PORT,
+  type ExportAccessResult,
+  type PaymentWaitPortMessage,
+} from '@/utils/messaging';
 
 const CONTENT_SCRIPT_PATH = 'content-scripts/content.js';
 const CONTEXT_MENU_ROOT_ID = 'smartexcel-context-root';
@@ -235,6 +240,48 @@ export default defineBackground(() => {
     void refreshActivationIfStale();
   });
 
+  // A shown payment QR holds a port open. The wait loop long-polls the
+  // website for the port's current order; paying activates this device on
+  // the server, popup and overlay follow the storage change, and a blocked
+  // context-menu export is finished here. Closing the card disconnects the
+  // port: the request is aborted and the status is checked one last time.
+  browser.runtime.onConnect.addListener((port) => {
+    if (port.name !== PAYMENT_WAIT_PORT) return;
+    let current: AbortController | null = null;
+    const stop = () => {
+      current?.abort();
+      current = null;
+    };
+    port.onMessage.addListener((raw: unknown) => {
+      const message = raw as PaymentWaitPortMessage | null;
+      if (message?.type === 'PING') return; // keeps the worker alive
+      stop();
+      if (message?.type !== 'WATCH' || !message.orderId) return;
+      const controller = new AbortController();
+      current = controller;
+      const orderId = message.orderId;
+      void waitForPayment(orderId, controller.signal).then((result) => {
+        if (controller.signal.aborted) return;
+        current = null;
+        if (result === 'paid') resumePendingContextExport();
+        try {
+          port.postMessage({ type: result === 'paid' ? 'PAID' : 'EXPIRED', orderId });
+        } catch {
+          // The card closed in between.
+        }
+      });
+    });
+    port.onDisconnect.addListener(() => {
+      stop();
+      void checkStatusNow()
+        .then(() => getActivationState())
+        .then((state) => {
+          if (state.activated) resumePendingContextExport();
+        })
+        .catch((error) => console.error('final payment status check failed:', error));
+    });
+  });
+
   browser.runtime.onMessage.addListener((message: any, _sender, sendResponse) => {
     if (message.type === 'SET_CONTEXT_TABLE') {
       if (_sender.tab?.id != null) {
@@ -255,23 +302,6 @@ export default defineBackground(() => {
         .catch((error) => {
           console.error('create payment QR failed:', error);
           sendResponse({ ok: false, error: 'network_error' });
-        });
-      return true;
-    }
-
-    // Polled (~2 s) while a payment QR is shown. Paying activates this device
-    // on the server; popup and overlay follow the storage change, and a
-    // blocked context-menu export is finished here.
-    if (message.type === 'CHECK_PAYMENT_STATUS') {
-      checkStatusNow()
-        .then(() => getActivationState())
-        .then((state) => {
-          sendResponse({ activated: state.activated });
-          if (state.activated) resumePendingContextExport();
-        })
-        .catch((error) => {
-          console.error('payment status check failed:', error);
-          sendResponse({ activated: false });
         });
       return true;
     }

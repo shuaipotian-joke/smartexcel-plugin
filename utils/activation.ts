@@ -7,6 +7,7 @@
  *   POST /api/plugin/activation/activate { code, deviceId, browser?, version? }
  *   POST /api/plugin/activation/status   { deviceId }
  *   POST /api/plugin/payment/xorpay/create { deviceId, payType } (Buy: QR order)
+ *   POST /api/plugin/payment/wait { deviceId, orderId } (long poll while the QR shows)
  *
  * The cached result is trusted on start so exports work offline; the server is
  * re-checked at most about once a day and only an explicit
@@ -25,6 +26,9 @@ export const SMARTEXCEL_URL =
 const ACTIVATE_URL = `${SMARTEXCEL_URL}/api/plugin/activation/activate`;
 const STATUS_URL = `${SMARTEXCEL_URL}/api/plugin/activation/status`;
 const PAYMENT_QR_URL = `${SMARTEXCEL_URL}/api/plugin/payment/xorpay/create`;
+const PAYMENT_WAIT_URL = `${SMARTEXCEL_URL}/api/plugin/payment/wait`;
+/** The server holds a wait ~25 s; give up on a request after this long. */
+const PAYMENT_WAIT_TIMEOUT_MS = 40 * 1000;
 
 /** Re-check an activated device at most this often. */
 const ACTIVATED_RECHECK_MS = 24 * 60 * 60 * 1000;
@@ -145,11 +149,12 @@ function normalizeCode(code: string) {
   return code.trim().toUpperCase().replace(/\s+/g, '');
 }
 
-async function postJson(url: string, body: unknown) {
+async function postJson(url: string, body: unknown, signal?: AbortSignal) {
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal,
   });
   let data: any = null;
   try {
@@ -157,7 +162,12 @@ async function postJson(url: string, body: unknown) {
   } catch {
     // Non-JSON body (proxy error page etc.); handled by the status code below.
   }
-  return { status: response.status, ok: response.ok, data };
+  return {
+    status: response.status,
+    ok: response.ok,
+    data,
+    retryAfter: Number(response.headers.get('Retry-After')) || 0,
+  };
 }
 
 export async function activateDevice(rawCode: string): Promise<ActivateResult> {
@@ -283,8 +293,8 @@ export type PaymentQrResult =
 /**
  * "Buy": a XorPay order (¥9.9, WeChat Pay or Alipay) bound to this device,
  * created on click. The server reuses a pending order of the device, and its
- * notify handler activates the device once paid; the caller polls
- * `checkStatusNow` meanwhile. No web page, no account.
+ * notify handler activates the device once paid; the caller long-polls
+ * `waitForPayment` meanwhile. No web page, no account.
  */
 export async function createPaymentQr(payType: PaymentPayType): Promise<PaymentQrResult> {
   const deviceId = await getDeviceId();
@@ -316,4 +326,93 @@ export async function createPaymentQr(payType: PaymentPayType): Promise<PaymentQ
   }
   if (result.status === 429) return { ok: false, error: 'rate_limited' };
   return { ok: false, error: 'server_error' };
+}
+
+/** One long poll: `pending` after the server's ~25 s hold, `error` to back off. */
+type PaymentWaitAnswer =
+  | { status: 'activated' }
+  | { status: 'pending' }
+  | { status: 'expired' }
+  | { status: 'error'; retryAfter: number };
+
+async function waitForPaymentOnce(orderId: string, signal: AbortSignal): Promise<PaymentWaitAnswer> {
+  const deviceId = await getDeviceId();
+  const timeout = new AbortController();
+  const abort = () => timeout.abort();
+  signal.addEventListener('abort', abort);
+  const timer = setTimeout(abort, PAYMENT_WAIT_TIMEOUT_MS);
+  let result: Awaited<ReturnType<typeof postJson>>;
+  try {
+    result = await postJson(PAYMENT_WAIT_URL, { deviceId, orderId }, timeout.signal);
+  } catch {
+    return { status: 'error', retryAfter: 0 };
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', abort);
+  }
+  if (result.ok && result.data?.activated === true) {
+    // Activated by purchase: no code hint.
+    await browser.storage.local.set({
+      [KEY_ACTIVATED]: true,
+      [KEY_ACTIVATED_AT]: String(result.data.activatedAt ?? new Date().toISOString()),
+      [KEY_CHECKED_AT]: Date.now(),
+    });
+    await browser.storage.local.remove(KEY_CODE_HINT);
+    return { status: 'activated' };
+  }
+  if (result.ok && result.data?.activated === false) {
+    return { status: result.data.expired === true ? 'expired' : 'pending' };
+  }
+  // The order is not (any more) this device's: a new QR is needed.
+  if (result.status === 404 && result.data?.error === 'order_not_found') {
+    return { status: 'expired' };
+  }
+  return { status: 'error', retryAfter: result.status === 429 ? result.retryAfter : 0 };
+}
+
+/** Waits between failed requests: 2 s, 5 s, then every 10 s. */
+const PAYMENT_WAIT_BACKOFF_MS = [2000, 5000, 10000];
+/** Never start two requests closer than this (a proxy that answers at once). */
+const PAYMENT_WAIT_MIN_GAP_MS = 2000;
+
+function sleep(ms: number, signal: AbortSignal) {
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener('abort', done);
+  });
+}
+
+/**
+ * Long-polls the website until this order's payment activates the device:
+ * one request at a time, each held ~25 s by the server, so an unpaid QR costs
+ * ~2-3 requests a minute. Errors back off 2 → 5 → 10 s. Resolves `paid`
+ * (storage already updated), `expired` (the order needs a new QR) or
+ * `stopped` when `signal` aborts.
+ */
+export async function waitForPayment(
+  orderId: string,
+  signal: AbortSignal,
+): Promise<'paid' | 'expired' | 'stopped'> {
+  let failures = 0;
+  while (!signal.aborted) {
+    const started = Date.now();
+    const answer = await waitForPaymentOnce(orderId, signal);
+    if (signal.aborted) break;
+    if (answer.status === 'activated') return 'paid';
+    if (answer.status === 'expired') return 'expired';
+    if (answer.status === 'pending') {
+      failures = 0;
+      await sleep(PAYMENT_WAIT_MIN_GAP_MS - (Date.now() - started), signal);
+      continue;
+    }
+    const backoff = PAYMENT_WAIT_BACKOFF_MS[Math.min(failures, PAYMENT_WAIT_BACKOFF_MS.length - 1)];
+    failures += 1;
+    await sleep(Math.min(Math.max(backoff, answer.retryAfter * 1000), 60 * 1000), signal);
+  }
+  return 'stopped';
 }
