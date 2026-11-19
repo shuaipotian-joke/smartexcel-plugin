@@ -248,7 +248,9 @@ export async function refreshActivationIfStale(): Promise<void> {
  */
 export async function openPurchasePage(lang: 'zh' | 'en'): Promise<void> {
   const deviceId = await getDeviceId();
-  const url = new URL(lang === 'zh' ? '/zh/plugin-payment' : '/plugin-payment', SMARTEXCEL_URL);
+  // Always prefix the locale: an unprefixed path follows the site's
+  // NEXT_LOCALE cookie, so "Buy · $5" could land on the ¥9.9 zh page.
+  const url = new URL(`/${lang}/plugin-payment`, SMARTEXCEL_URL);
   url.searchParams.set('source', 'extension');
   url.searchParams.set('closeAfterPayment', 'true');
   url.searchParams.set('deviceId', deviceId);
