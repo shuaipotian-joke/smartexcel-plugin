@@ -22,6 +22,9 @@ const STATUS_URL = `${SMARTEXCEL_URL}/api/plugin/activation/status`;
 const ACTIVATED_RECHECK_MS = 24 * 60 * 60 * 1000;
 /** A locked device asks again at most this often (e.g. after paying on the website). */
 const LOCKED_RECHECK_MS = 60 * 1000;
+/** While a payment tab is open, ask this often, for at most this long. */
+const PAYMENT_POLL_MS = 4 * 1000;
+const PAYMENT_WATCH_MAX_MS = 15 * 60 * 1000;
 
 const KEY_DEVICE_ID = 'se_device_id';
 const KEY_ACTIVATED = 'se_activated';
@@ -192,7 +195,7 @@ export async function activateDevice(rawCode: string): Promise<ActivateResult> {
  * Ask the server for this device's status and update the cache. Network and
  * server errors keep the cached state; only `{ activated: false }` locks.
  */
-async function checkStatusNow(): Promise<void> {
+export async function checkStatusNow(): Promise<void> {
   const deviceId = await getDeviceId();
   try {
     const result = await postJson(STATUS_URL, { deviceId });
@@ -242,11 +245,11 @@ export async function refreshActivationIfStale(): Promise<void> {
 }
 
 /**
- * Where "Buy" goes. The payment → activation flow is not decided yet, so it
- * lives only here: for now it opens the existing one-time plugin payment page
- * and passes the device ID so the website can bind the purchase to it.
+ * Where "Buy" goes: the one-time plugin payment page with this device's ID.
+ * A successful payment activates the device on the server (no code); the
+ * returned tab is watched with `watchPaymentTab` to pick that up.
  */
-export async function openPurchasePage(lang: 'zh' | 'en'): Promise<void> {
+export async function openPurchasePage(lang: 'zh' | 'en'): Promise<number | undefined> {
   const deviceId = await getDeviceId();
   // Always prefix the locale: an unprefixed path follows the site's
   // NEXT_LOCALE cookie, so "Buy · $5" could land on the ¥9.9 zh page.
@@ -254,5 +257,52 @@ export async function openPurchasePage(lang: 'zh' | 'en'): Promise<void> {
   url.searchParams.set('source', 'extension');
   url.searchParams.set('closeAfterPayment', 'true');
   url.searchParams.set('deviceId', deviceId);
-  await browser.tabs.create({ url: url.toString() });
+  const tab = await browser.tabs.create({ url: url.toString() });
+  return tab.id;
+}
+
+const watchedPaymentTabs = new Set<number>();
+
+/**
+ * Poll the activation status while the payment tab is open (every few
+ * seconds, at most 15 minutes) and once more when it closes. Calls
+ * `onActivated` once if the device becomes activated.
+ */
+export function watchPaymentTab(tabId: number, onActivated: () => void): void {
+  if (watchedPaymentTabs.has(tabId)) return;
+  watchedPaymentTabs.add(tabId);
+  const startedAt = Date.now();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const stop = () => {
+    clearTimeout(timer);
+    watchedPaymentTabs.delete(tabId);
+    browser.tabs.onRemoved.removeListener(onRemoved);
+  };
+  const check = async () => {
+    await checkStatusNow();
+    if ((await getActivationState()).activated) {
+      stop();
+      onActivated();
+      return true;
+    }
+    return false;
+  };
+  const tick = async () => {
+    if (await check()) return;
+    if (Date.now() - startedAt >= PAYMENT_WATCH_MAX_MS) {
+      // Stop polling; the check on close still runs.
+      timer = undefined;
+      return;
+    }
+    timer = setTimeout(() => void tick(), PAYMENT_POLL_MS);
+  };
+  function onRemoved(closedTabId: number) {
+    if (closedTabId !== tabId) return;
+    stop();
+    void check();
+  }
+
+  browser.tabs.onRemoved.addListener(onRemoved);
+  timer = setTimeout(() => void tick(), PAYMENT_POLL_MS);
 }

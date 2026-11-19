@@ -4,6 +4,7 @@ import {
   getDeviceId,
   openPurchasePage,
   refreshActivationIfStale,
+  watchPaymentTab,
 } from '@/utils/activation';
 import type { ExportAccessResult } from '@/utils/messaging';
 
@@ -205,6 +206,17 @@ async function runContextExport(pending: PendingContextExport): Promise<void> {
   );
 }
 
+/** After any activation: finish the context-menu export it blocked, if recent. */
+function resumePendingContextExport() {
+  const pending = pendingContextExport;
+  if (!pending) return;
+  pendingContextExport = null;
+  if (Date.now() - pending.blockedAt > PENDING_EXPORT_TTL_MS) return;
+  void runContextExport(pending).catch((error) =>
+    console.error('resume context export failed:', error),
+  );
+}
+
 // ─── Main background entry ─────────────────────────────────────────────────
 
 export default defineBackground(() => {
@@ -239,7 +251,12 @@ export default defineBackground(() => {
     if (message.type === 'OPEN_PAYMENT_PAGE') {
       const lang = message.payload?.lang === 'zh' ? 'zh' : 'en';
       openPurchasePage(lang)
-        .then(() => sendResponse({ ok: true }))
+        .then((tabId) => {
+          // Paying activates this device on the server; pick it up at once.
+          // Popup and overlay follow the storage change.
+          if (tabId != null) watchPaymentTab(tabId, resumePendingContextExport);
+          sendResponse({ ok: true });
+        })
         .catch((error) => {
           console.error('open payment page failed:', error);
           sendResponse({ ok: false });
@@ -261,16 +278,7 @@ export default defineBackground(() => {
       activateDevice(String(message.payload?.code ?? ''))
         .then((result) => {
           sendResponse(result);
-          const pending = pendingContextExport;
-          if (result.ok && pending) {
-            pendingContextExport = null;
-            if (Date.now() - pending.blockedAt > PENDING_EXPORT_TTL_MS) {
-              return;
-            }
-            void runContextExport(pending).catch((error) =>
-              console.error('resume context export failed:', error),
-            );
-          }
+          if (result.ok) resumePendingContextExport();
         })
         .catch((error) => {
           console.error('activate failed:', error);
