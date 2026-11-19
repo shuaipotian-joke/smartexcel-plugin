@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Merged cells fixtures</title>
+  <style>
+    body { font: 14px sans-serif; margin: 24px; }
+    table { border-collapse: collapse; margin: 8px 0 24px; min-width: 320px; }
+    th, td { border: 1px solid #999; padding: 4px 8px; }
+    [role="table"] { display: grid; width: 360px; margin-bottom: 24px; }
+    [role="row"] { display: flex; }
+    [role="row"] > * { flex: 1; border: 1px solid #999; padding: 4px 8px; }
+  </style>
+</head>
+<body>
+  <h2>Plain</h2>
+  <table id="plain">
+    <thead><tr><th>Name</th><th>Age</th></tr></thead>
+    <tbody>
+      <tr><td>Ann</td><td>31</td></tr>
+      <tr><td>Bob</td><td>42</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Two-level header with rowspan</h2>
+  <table id="two-level">
+    <thead>
+      <tr><th rowspan="2">Region</th><th colspan="2">H1</th><th colspan="2">H2</th></tr>
+      <tr><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th></tr>
+    </thead>
+    <tbody>
+      <tr><td rowspan="2">North</td><td>1</td><td>2</td><td>3</td><td>4</td></tr>
+      <tr><td>5</td><td>6</td><td>7</td><td>8</td></tr>
+      <tr><td>South</td><td>9</td><td>10</td><td>11</td><td>12</td></tr>
+    </tbody>
+  </table>
+
+  <h2>th row headers in body</h2>
+  <table id="th-body">
+    <tr><th>Item</th><th>Price</th></tr>
+    <tr><th>Apple</th><td>3</td></tr>
+    <tr><th>Pear</th><td>4</td></tr>
+  </table>
+
+  <h2>No header, th first cell</h2>
+  <table id="th-first-data">
+    <tr><th>Apple</th><td>3</td></tr>
+    <tr><th>Pear</th><td>4</td></tr>
+  </table>
+
+  <h2>Pivot corner</h2>
+  <table id="pivot-corner">
+    <tr><td></td><th>A</th><th>B</th></tr>
+    <tr><th>x</th><td>1</td><td>2</td></tr>
+  </table>
+
+  <h2>Nested</h2>
+  <table id="nested">
+    <thead><tr><th>Key</th><th>Detail</th></tr></thead>
+    <tbody>
+      <tr><td>k1</td><td><table id="inner"><tr><td>in-a</td><td>in-b</td></tr><tr><td>in-c</td><td>in-d</td></tr></table></td></tr>
+      <tr><td>k2</td><td>plain</td></tr>
+    </tbody>
+  </table>
+
+  <h2>tfoot</h2>
+  <table id="tfoot">
+    <thead><tr><th>Item</th><th>Qty</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="3">Fruit</td><td>1</td></tr>
+      <tr><td>2</td></tr>
+    </tbody>
+    <tfoot><tr><td>Total</td><td>3</td></tr></tfoot>
+  </table>
+
+  <h2>rowspan + colspan on one cell</h2>
+  <table id="both-spans">
+    <thead><tr><th>A</th><th>B</th><th>C</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="2" colspan="2">Big</td><td>c1</td></tr>
+      <tr><td>c2</td></tr>
+      <tr><td>a3</td><td>b3</td><td>c3</td></tr>
+    </tbody>
+  </table>
+
+  <h2>rowspan past end of tbody</h2>
+  <table id="rowspan-overflow">
+    <thead><tr><th>Group</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="5">G1</td><td>1</td></tr>
+      <tr><td>2</td></tr>
+    </tbody>
+    <tbody>
+      <tr><td>G2</td><td>3</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Div grid</h2>
+  <div id="div-grid" role="table" aria-label="Div grid">
+    <div role="row"><span role="columnheader">City</span><span role="columnheader">Pop</span></div>
+    <div role="row"><span role="cell">Oslo</span><span role="cell">700</span></div>
+    <div role="row"><span role="cell">Bergen</span><span role="cell">290</span></div>
+  </div>
+</body>
+</html>

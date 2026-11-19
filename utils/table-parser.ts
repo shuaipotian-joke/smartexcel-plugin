@@ -1,8 +1,16 @@
 export interface ParsedTable {
   id: string;
   title: string;
+  /** Last header row, one label per column (popup preview, column names). */
   headers: string[];
+  /** Every header row, top to bottom; `headers` is the last one. */
+  headerRows: string[][];
   rows: string[][];
+  /**
+   * Merged ranges in sheet coordinates: row 0 is the first header row, data
+   * rows follow the header rows. Cells covered by a rowspan repeat the value
+   * in `headerRows`/`rows`; colspan continuation cells are empty.
+   */
   merges: Array<{
     startRow: number;
     endRow: number;
@@ -56,22 +64,29 @@ export function parseTable(table: TableElement): ParsedTable {
   const rows: string[][] = [];
   const dataRowElements: Element[] = [];
   const parsedGrid = buildParsedGrid(htmlTable);
-  const headers = resolveHeaders(htmlTable, parsedGrid);
-  const merges = parsedGrid.merges;
+  const { headers, headerRows, headerMerges } = resolveHeaders(htmlTable, parsedGrid);
   const colCount = Math.max(parsedGrid.colCount, headers.length);
 
+  // Grid row -> sheet row. Header rows of this table keep their place; empty
+  // data rows are dropped, so later data rows move up.
+  const sheetRowOf: Array<number | undefined> = [];
+  const headerOffset = headerRows.length - parsedGrid.headerRowCount;
   parsedGrid.normalizedGrid.forEach((rowData, index) => {
     if (index < parsedGrid.headerRowCount) {
+      sheetRowOf[index] = index + headerOffset;
       return;
     }
 
     if (rowData.length > 0 && rowData.some((cell) => cell.trim() !== '')) {
+      sheetRowOf[index] = headerRows.length + rows.length;
       rows.push(rowData);
       if (parsedGrid.tableRows[index]) {
         dataRowElements.push(parsedGrid.tableRows[index]);
       }
     }
   });
+
+  const merges = [...headerMerges, ...remapMerges(parsedGrid.merges, sheetRowOf)];
 
   const caption = htmlTable.querySelector('caption');
   const ariaLabel = htmlTable.getAttribute('aria-label');
@@ -91,6 +106,7 @@ export function parseTable(table: TableElement): ParsedTable {
     id: htmlTable.dataset.smartexcelTableId ?? 'table-unknown',
     title,
     headers,
+    headerRows,
     rows,
     merges,
     element: htmlTable,
@@ -166,21 +182,20 @@ export function findClosestTableElement(target: HTMLElement | null): TableElemen
 
 function buildParsedGrid(table: HTMLTableElement) {
   const merges: ParsedTable['merges'] = [];
-  const tableRows = Array.from(table.querySelectorAll('tr'));
+  // Only this table's own rows: rows of nested tables belong to their cell.
+  const tableRows = Array.from(table.querySelectorAll('tr')).filter(
+    (row) => row.closest('table') === table
+  );
   const grid: string[][] = [];
   const occupancy: boolean[][] = [];
+  const groupEnds = getRowGroupEnds(tableRows);
 
-  const thead = table.querySelector('thead');
   tableRows.forEach((row, rowIndex) => {
-    const cells = Array.from(row.querySelectorAll(':scope > th, :scope > td'));
-    if (cells.length === 0) {
-      return;
-    }
-
     if (!grid[rowIndex]) {
       grid[rowIndex] = [];
     }
 
+    const cells = Array.from(row.querySelectorAll(':scope > th, :scope > td'));
     let colIndex = 0;
     cells.forEach((cell) => {
       while (occupancy[rowIndex]?.[colIndex]) {
@@ -189,7 +204,13 @@ function buildParsedGrid(table: HTMLTableElement) {
 
       const cellText = getCellText(cell as HTMLElement);
       const colspan = Math.max(1, Number.parseInt(cell.getAttribute('colspan') || '1', 10) || 1);
-      const rowspan = Math.max(1, Number.parseInt(cell.getAttribute('rowspan') || '1', 10) || 1);
+      // A rowspan never leaves its row group (thead/tbody/tfoot); 0 means
+      // "to the end of the group", as in HTML.
+      const rowsLeftInGroup = groupEnds[rowIndex] - rowIndex + 1;
+      const requestedRowspan = Number.parseInt(cell.getAttribute('rowspan') || '1', 10);
+      const rowspan = requestedRowspan === 0
+        ? rowsLeftInGroup
+        : Math.min(Math.max(1, requestedRowspan || 1), rowsLeftInGroup);
 
       for (let rowOffset = 0; rowOffset < rowspan; rowOffset += 1) {
         const targetRow = rowIndex + rowOffset;
@@ -225,11 +246,21 @@ function buildParsedGrid(table: HTMLTableElement) {
     Array.from({ length: colCount }, (_, index) => row[index] ?? '')
   );
 
-  const headerRowCount = thead
-    ? thead.querySelectorAll('tr').length
-    : normalizedGrid.length > 0 && tableRows[0]?.querySelector('th') !== null
-      ? 1
-      : 0;
+  // Header rows: the leading <thead> rows; without a <thead>, a first row made
+  // of <th> cells, allowing an empty <td> corner (a <th> row header next to
+  // data cells in a body row is data).
+  let headerRowCount = 0;
+  while (tableRows[headerRowCount]?.parentElement?.tagName === 'THEAD') {
+    headerRowCount += 1;
+  }
+  if (headerRowCount === 0 && tableRows[0]) {
+    const firstCells = Array.from(tableRows[0].querySelectorAll(':scope > th, :scope > td'));
+    const isHeaderLike = firstCells.some((cell) => cell.tagName === 'TH') &&
+      firstCells.every((cell) => cell.tagName === 'TH' || getCellText(cell as HTMLElement) === '');
+    if (isHeaderLike) {
+      headerRowCount = 1;
+    }
+  }
 
   return {
     merges,
@@ -240,26 +271,89 @@ function buildParsedGrid(table: HTMLTableElement) {
   };
 }
 
+/** For each row, the index of the last row in the same row group. */
+function getRowGroupEnds(rows: Element[]): number[] {
+  const ends: number[] = [];
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const next = rows[index + 1];
+    ends[index] = next && next.parentElement === rows[index].parentElement
+      ? ends[index + 1]
+      : index;
+  }
+  return ends;
+}
+
+/** Moves merges to new row indices; rows mapped to `undefined` were dropped. */
+function remapMerges(
+  merges: ParsedTable['merges'],
+  rowMap: Array<number | undefined>
+): ParsedTable['merges'] {
+  return merges
+    .map((merge) => {
+      const kept: number[] = [];
+      for (let row = merge.startRow; row <= merge.endRow; row += 1) {
+        const mapped = rowMap[row];
+        if (mapped !== undefined) {
+          kept.push(mapped);
+        }
+      }
+      if (kept.length === 0) {
+        return null;
+      }
+      return {
+        startRow: kept[0],
+        endRow: kept[kept.length - 1],
+        startCol: merge.startCol,
+        endCol: merge.endCol,
+      };
+    })
+    .filter((merge): merge is NonNullable<typeof merge> =>
+      merge !== null && (merge.endRow > merge.startRow || merge.endCol > merge.startCol)
+    );
+}
+
 function resolveHeaders(
   table: HTMLTableElement,
   parsedGrid: ReturnType<typeof buildParsedGrid>
-): string[] {
+): { headers: string[]; headerRows: string[][]; headerMerges: ParsedTable['merges'] } {
   if (parsedGrid.headerRowCount > 0) {
-    return [...(parsedGrid.normalizedGrid[parsedGrid.headerRowCount - 1] ?? [])];
+    const headerRows = parsedGrid.normalizedGrid
+      .slice(0, parsedGrid.headerRowCount)
+      .map((row) => [...(row ?? [])]);
+    return {
+      headers: [...headerRows[headerRows.length - 1]],
+      headerRows,
+      // The table's own header merges are remapped with its data rows.
+      headerMerges: [],
+    };
   }
 
   const headerTable = findLinkedHeaderTable(table, parsedGrid.colCount);
   if (!headerTable) {
-    return [];
+    return { headers: [], headerRows: [], headerMerges: [] };
   }
 
+  // Split header (e.g. Element UI): the header lives in its own <table>.
   const headerGrid = buildParsedGrid(headerTable);
-  const fallbackHeaders =
-    headerGrid.normalizedGrid[headerGrid.headerRowCount - 1] ??
-    headerGrid.normalizedGrid[headerGrid.normalizedGrid.length - 1] ??
-    [];
+  const rowMap: Array<number | undefined> = [];
+  let headerRows: string[][];
+  if (headerGrid.headerRowCount > 0) {
+    headerRows = headerGrid.normalizedGrid.slice(0, headerGrid.headerRowCount);
+    headerRows.forEach((_, index) => {
+      rowMap[index] = index;
+    });
+  } else {
+    const lastIndex = headerGrid.normalizedGrid.length - 1;
+    headerRows = lastIndex >= 0 ? [headerGrid.normalizedGrid[lastIndex]] : [];
+    rowMap[lastIndex] = 0;
+  }
+  headerRows = headerRows.map((row) => [...(row ?? [])]);
 
-  return [...fallbackHeaders];
+  return {
+    headers: [...(headerRows[headerRows.length - 1] ?? [])],
+    headerRows,
+    headerMerges: remapMerges(headerGrid.merges, rowMap),
+  };
 }
 
 function findLinkedHeaderTable(
@@ -475,6 +569,7 @@ function parseDivTable(root: HTMLElement): ParsedTable {
     id: root.dataset.smartexcelTableId ?? 'table-unknown',
     title,
     headers,
+    headerRows: headers.length > 0 ? [normalizeRow(headers, colCount)] : [],
     rows: rows.map((row) => normalizeRow(row, colCount)),
     merges: [],
     element: root,
