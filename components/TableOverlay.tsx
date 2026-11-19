@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import {
   findClosestTableElement,
   getLogicalTable,
@@ -13,36 +13,21 @@ import {
   safeSendRuntimeMessage,
 } from '@/utils/extension-runtime';
 import { exportToExcel } from '@/utils/excel-export';
-import { useExtensionStore } from '@/utils/store';
+import { SHOW_TABLE_ICON_KEY, useExtensionStore } from '@/utils/store';
 import { t, type Lang } from '@/utils/i18n';
-import { TRIAL_EXPORTS } from '@/utils/constants';
-import { Check, ChevronDown, FileSpreadsheet, Table2 } from 'lucide-react';
+import type { ExportAccessResult } from '@/utils/messaging';
+import { theme } from '@/utils/theme';
+import { openBuyPage, useActivationForm } from '@/utils/use-activation';
+import { ChevronRight, FileSpreadsheet, KeyRound, Table2, X } from 'lucide-react';
 
-type CreditCheckResult = {
-  allowed: boolean;
-  remaining?: number;
-  unlimited?: boolean;
-  isLoggedIn: boolean;
-  reason?: string;
-};
+/** Window event the content script fires to open the activation prompt. */
+export const ACTIVATION_PROMPT_EVENT = 'smartexcel:activation-prompt';
 
-async function requestExportAccess(lang: Lang): Promise<CreditCheckResult> {
-  const result = await safeSendRuntimeMessage<CreditCheckResult>({
+async function requestExportAccess(): Promise<ExportAccessResult> {
+  const result = await safeSendRuntimeMessage<ExportAccessResult>({
     type: 'CHECK_EXPORT_ACCESS',
-    payload: { amount: 1, lang },
   });
-  return result ?? { allowed: false, reason: 'error', isLoggedIn: false };
-}
-
-function openLoginPage() {
-  void safeSendRuntimeMessage({ type: 'OPEN_LOGIN' });
-}
-
-function openPaymentPage(lang: Lang) {
-  void safeSendRuntimeMessage({
-    type: 'OPEN_PAYMENT_PAGE',
-    payload: { lang },
-  });
+  return result ?? { allowed: false, reason: 'not_activated' };
 }
 
 interface FloatingButton {
@@ -52,19 +37,11 @@ interface FloatingButton {
   table: ParsedTable | null;
 }
 
-const FAB_SIZE = 38;
+type PendingExport = { table: ParsedTable; format: 'xlsx' | 'csv' };
+
+const FAB_SIZE = 36;
 const FAB_MARGIN = 12;
 const HEADER_OFFSET = 4;
-const palette = {
-  ink: '#173127',
-  muted: '#557064',
-  faint: '#6d8277',
-  primary: '#1f966b',
-  primaryDark: '#1d7858',
-  primarySoft: '#d9f5e8',
-  cream: '#fffdf7',
-  line: '#d9e7d8',
-};
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -86,7 +63,7 @@ function getVisibleFabX(bounds: { left: number; right: number }) {
 }
 
 export default function TableOverlay() {
-  const isEnabled = useExtensionStore((s) => s.isEnabled);
+  const showTableIcon = useExtensionStore((s) => s.showTableIcon);
   const lang = useExtensionStore((s) => s.lang);
   const [contextValid, setContextValid] = useState(() => isExtensionContextValid());
   const [fab, setFab] = useState<FloatingButton>({
@@ -97,25 +74,33 @@ export default function TableOverlay() {
   });
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState('');
+  const [promptOpen, setPromptOpen] = useState(false);
+  const pendingExport = useRef<PendingExport | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const fabRef = useRef<HTMLDivElement>(null);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
-    setTimeout(() => setToast(''), 2000);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(''), 2200);
   }, []);
 
-  // Load saved lang preference and watch for changes made in the popup
+  // Follow language and table-icon changes made in the popup, on every open page.
   useEffect(() => {
     if (!isExtensionContextValid()) {
       setContextValid(false);
       return;
     }
 
-    useExtensionStore.getState().initLang();
     const handler = (changes: Record<string, { newValue?: unknown }>) => {
       if (changes.se_lang?.newValue) {
         useExtensionStore.setState({ lang: changes.se_lang.newValue as Lang });
+      }
+      if (changes[SHOW_TABLE_ICON_KEY]) {
+        useExtensionStore.setState({
+          showTableIcon: changes[SHOW_TABLE_ICON_KEY].newValue !== false,
+        });
       }
     };
     return safeAddStorageChangedListener(handler);
@@ -127,6 +112,7 @@ export default function TableOverlay() {
       setContextValid(valid);
       if (!valid) {
         setMenuOpen(false);
+        setPromptOpen(false);
         setFab((prev) => ({ ...prev, visible: false }));
       }
     }, 1000);
@@ -135,21 +121,23 @@ export default function TableOverlay() {
   }, []);
 
   useEffect(() => {
-    const handleToastEvent = (event: Event) => {
-      const detail = (event as CustomEvent<{ message?: string }>).detail;
-      if (detail?.message) {
-        showToast(detail.message);
-      }
+    const openPrompt = () => {
+      pendingExport.current = null;
+      setPromptOpen(true);
     };
-
-    window.addEventListener('smartexcel:toast', handleToastEvent as EventListener);
-    return () => {
-      window.removeEventListener('smartexcel:toast', handleToastEvent as EventListener);
-    };
-  }, [showToast]);
+    window.addEventListener(ACTIVATION_PROMPT_EVENT, openPrompt);
+    return () => window.removeEventListener(ACTIVATION_PROMPT_EVENT, openPrompt);
+  }, []);
 
   useEffect(() => {
-    if (!isEnabled || !contextValid) return;
+    if (!showTableIcon) {
+      setMenuOpen(false);
+      setFab((prev) => ({ ...prev, visible: false }));
+    }
+  }, [showTableIcon]);
+
+  useEffect(() => {
+    if (!showTableIcon || !contextValid) return;
 
     const handleMouseOver = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
@@ -164,7 +152,6 @@ export default function TableOverlay() {
       const parsed = parseTable(table);
       if (parsed.rowCount === 0 && parsed.headers.length === 0) return;
 
-      const minX = FAB_MARGIN;
       const minY = FAB_MARGIN;
       const maxY = Math.max(FAB_MARGIN, window.innerHeight - FAB_SIZE - FAB_MARGIN);
 
@@ -205,7 +192,19 @@ export default function TableOverlay() {
       window.removeEventListener('scroll', handleScroll, true);
       clearTimeout(hideTimer.current);
     };
-  }, [menuOpen, isEnabled, fab.visible]);
+  }, [menuOpen, showTableIcon, contextValid, fab.visible]);
+
+  const runExport = useCallback(
+    ({ table, format }: PendingExport) => {
+      try {
+        exportToExcel(table, { format, withIndex: false });
+        showToast(t('exportedAs', lang, { fmt: format.toUpperCase() }));
+      } catch {
+        showToast(t('exportFailed', lang));
+      }
+    },
+    [lang, showToast],
+  );
 
   const handleExport = useCallback(
     async (format: 'xlsx' | 'csv') => {
@@ -217,168 +216,156 @@ export default function TableOverlay() {
       }
       setMenuOpen(false);
 
-      // Ask the background worker whether this export is allowed
-      const result = await requestExportAccess(lang);
-
+      const request = { table: fab.table, format };
+      const result = await requestExportAccess();
       if (!result.allowed) {
-        if (result.reason === 'not_logged_in') {
-          showToast(t('loginRequiredToExport', lang, { n: TRIAL_EXPORTS }));
-          openLoginPage();
-          return;
-        }
-
-        openPaymentPage(lang);
+        pendingExport.current = request;
+        setPromptOpen(true);
         return;
       }
-
-      try {
-        exportToExcel(fab.table, { format, withIndex: false });
-        const fmt = format.toUpperCase();
-        const hint =
-          !result.unlimited && result.remaining !== undefined
-            ? t('trialLeft', lang, { n: result.remaining })
-            : '';
-        showToast(t('exportedAs', lang, { fmt }) + hint);
-      } catch {
-        showToast(t('exportFailed', lang));
-      }
+      runExport(request);
     },
-    [fab.table, lang, showToast],
+    [fab.table, runExport],
   );
 
-  if (!fab.visible || !isEnabled || !contextValid) return null;
+  const handleActivated = useCallback(() => {
+    setPromptOpen(false);
+    const pending = pendingExport.current;
+    pendingExport.current = null;
+    if (pending) {
+      runExport(pending);
+    } else {
+      showToast(t('activationSuccess', lang));
+    }
+  }, [lang, runExport, showToast]);
+
+  if (!contextValid) return null;
+
+  const fabShown = fab.visible && showTableIcon;
 
   return (
     <>
-      <div
-        ref={fabRef}
-        style={{
-          position: 'fixed',
-          left: `${fab.x}px`,
-          top: `${fab.y}px`,
-          zIndex: 2147483647,
-          pointerEvents: 'auto',
-        }}
-        onMouseEnter={() => clearTimeout(hideTimer.current)}
-        onMouseLeave={() => {
-          if (!menuOpen) {
-            hideTimer.current = setTimeout(() => {
-              setFab((prev) => ({ ...prev, visible: false }));
-            }, 400);
-          }
-        }}
-      >
-        <button
-          onClick={() => setMenuOpen(!menuOpen)}
+      {fabShown && (
+        <div
+          ref={fabRef}
           style={{
-            width: `${FAB_SIZE}px`,
-            height: `${FAB_SIZE}px`,
-            borderRadius: '12px',
-            background:
-              'linear-gradient(135deg, #2ab37f 0%, #1f966b 100%)',
-            border: '1px solid rgba(255,255,255,0.75)',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow:
-              '0 18px 38px -18px rgba(24,79,62,0.58), 0 0 0 4px rgba(217,245,232,0.82)',
-            transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+            position: 'fixed',
+            left: `${fab.x}px`,
+            top: `${fab.y}px`,
+            zIndex: 2147483647,
             pointerEvents: 'auto',
           }}
-          onMouseOver={(e) => {
-            e.currentTarget.style.transform = 'translateY(-1px) scale(1.08)';
-            e.currentTarget.style.boxShadow =
-              '0 24px 44px -18px rgba(24,79,62,0.68), 0 0 0 5px rgba(217,245,232,0.95)';
+          onMouseEnter={() => clearTimeout(hideTimer.current)}
+          onMouseLeave={() => {
+            if (!menuOpen) {
+              hideTimer.current = setTimeout(() => {
+                setFab((prev) => ({ ...prev, visible: false }));
+              }, 400);
+            }
           }}
-          onMouseOut={(e) => {
-            e.currentTarget.style.transform = 'scale(1)';
-            e.currentTarget.style.boxShadow =
-              '0 18px 38px -18px rgba(24,79,62,0.58), 0 0 0 4px rgba(217,245,232,0.82)';
-          }}
-          title={t('exportTableTitle', lang)}
         >
-          <FileSpreadsheet size={19} color="#fff" strokeWidth={2.3} />
-        </button>
-
-        {menuOpen && (
-          <div
+          <button
+            onClick={() => setMenuOpen(!menuOpen)}
             style={{
-              position: 'absolute',
-              top: '46px',
-              right: '0',
-              width: '238px',
-              background:
-                'linear-gradient(180deg, rgba(255,253,247,0.98) 0%, rgba(255,255,255,0.98) 100%)',
-              borderRadius: '14px',
-              boxShadow:
-                '0 28px 78px -42px rgba(24,79,62,0.45), 0 10px 24px -18px rgba(24,79,62,0.24)',
-              border: `1px solid ${palette.line}`,
-              overflow: 'hidden',
-              animation: 'smartexcel-fadein 0.15s ease',
-              pointerEvents: 'auto',
-              fontFamily:
-                'Aptos, "Segoe UI Variable", "Segoe UI", Inter, system-ui, -apple-system, sans-serif',
-            }}
-          >
-            {/* Table info */}
-            <div style={{
+              width: `${FAB_SIZE}px`,
+              height: `${FAB_SIZE}px`,
+              borderRadius: '10px',
+              background: theme.accent,
+              border: `1px solid ${theme.accentHover}`,
+              cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: '9px',
-              padding: '12px 14px',
-              backgroundColor: '#f1fbf6',
-              borderBottom: `1px solid ${palette.line}`,
-              fontSize: '12px',
-              color: palette.muted,
-            }}>
-              <span style={{
-                width: '26px',
-                height: '26px',
-                borderRadius: '8px',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: '#fff',
-                color: palette.primary,
-                boxShadow: '0 8px 18px -14px rgba(24,79,62,0.42)',
-              }}>
-                <Table2 size={15} />
-              </span>
-              <span style={{ fontWeight: 600 }}>
-                {fab.table ? t('rowsCols', lang, { r: fab.table.rowCount, c: fab.table.colCount }) : ''}
-              </span>
-            </div>
+              justifyContent: 'center',
+              boxShadow: theme.shadow,
+              transition: 'background-color 0.15s ease, transform 0.15s ease',
+              pointerEvents: 'auto',
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.background = theme.accentHover;
+              e.currentTarget.style.transform = 'translateY(-1px)';
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.background = theme.accent;
+              e.currentTarget.style.transform = 'none';
+            }}
+            title={t('exportTableTitle', lang)}
+          >
+            <FileSpreadsheet size={18} color="#fff" strokeWidth={2} />
+          </button>
 
-            <MenuItem
-              icon={<FileSpreadsheet size={16} />}
-              label={t('exportAsExcel', lang)}
-              sublabel=".xlsx"
-              primary
-              onClick={() => handleExport('xlsx')}
-            />
-            <MenuItem
-              icon={<Table2 size={16} />}
-              label={t('exportAsCsv', lang)}
-              sublabel=".csv"
-              onClick={() => handleExport('csv')}
-            />
-          </div>
-        )}
-      </div>
+          {menuOpen && (
+            <div
+              style={{
+                position: 'absolute',
+                top: `${FAB_SIZE + 8}px`,
+                right: '0',
+                width: '236px',
+                background: theme.paper,
+                borderRadius: '14px',
+                boxShadow: theme.shadowLift,
+                border: `1px solid ${theme.line}`,
+                overflow: 'hidden',
+                animation: 'smartexcel-fadein 0.15s ease',
+                pointerEvents: 'auto',
+                fontFamily: theme.fontSans,
+              }}
+            >
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '12px 16px',
+                borderBottom: `1px solid ${theme.line}`,
+                fontSize: '12px',
+                color: theme.muted,
+              }}>
+                <Table2 size={14} color={theme.faint} />
+                <span>
+                  {fab.table ? t('rowsCols', lang, { r: fab.table.rowCount, c: fab.table.colCount }) : ''}
+                </span>
+              </div>
+
+              <div style={{ padding: '6px' }}>
+                <MenuItem
+                  icon={<FileSpreadsheet size={15} />}
+                  label={t('exportAsExcel', lang)}
+                  sublabel=".xlsx"
+                  primary
+                  onClick={() => handleExport('xlsx')}
+                />
+                <MenuItem
+                  icon={<Table2 size={15} />}
+                  label={t('exportAsCsv', lang)}
+                  sublabel=".csv"
+                  onClick={() => handleExport('csv')}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {promptOpen && (
+        <ActivationPrompt
+          lang={lang}
+          onClose={() => {
+            pendingExport.current = null;
+            setPromptOpen(false);
+          }}
+          onActivated={handleActivated}
+        />
+      )}
 
       {toast && (
         <div style={{
           position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
-          display: 'flex', alignItems: 'center', gap: '8px',
-          backgroundColor: palette.ink, color: '#fff', padding: '10px 18px',
-          borderRadius: '12px', fontSize: '13px', boxShadow: '0 24px 54px -34px rgba(24,79,62,0.58)',
+          backgroundColor: theme.ink, color: theme.paper, padding: '10px 18px',
+          borderRadius: '12px', fontSize: '13px', lineHeight: 1.4, boxShadow: theme.shadowLift,
           zIndex: 2147483647, animation: 'smartexcel-fadein 0.2s ease',
-          pointerEvents: 'auto', fontFamily: 'Aptos, "Segoe UI Variable", "Segoe UI", Inter, system-ui, -apple-system, sans-serif',
+          pointerEvents: 'auto', fontFamily: theme.fontSans,
           whiteSpace: 'nowrap',
         }}>
-          <Check size={15} color="#82dbb9" strokeWidth={2.4} />
-          <span>{toast}</span>
+          {toast}
         </div>
       )}
 
@@ -404,13 +391,12 @@ function MenuItem({ icon, label, sublabel, primary, onClick }: {
       onClick={onClick}
       style={{
         width: '100%', display: 'flex', alignItems: 'center', gap: '10px',
-        padding: '10px 14px', backgroundColor: 'transparent', border: 'none',
-        cursor: 'pointer', fontSize: '13px', color: palette.ink,
+        padding: '9px 10px', backgroundColor: 'transparent', border: 'none',
+        borderRadius: '10px', cursor: 'pointer', fontSize: '13px', color: theme.ink,
         transition: 'background-color 0.12s', textAlign: 'left',
-        fontFamily: 'Aptos, "Segoe UI Variable", "Segoe UI", Inter, system-ui, -apple-system, sans-serif',
-        pointerEvents: 'auto',
+        fontFamily: theme.fontSans, pointerEvents: 'auto',
       }}
-      onMouseOver={(e) => { e.currentTarget.style.backgroundColor = primary ? '#d9f5e8' : '#f1fbf6'; }}
+      onMouseOver={(e) => { e.currentTarget.style.backgroundColor = theme.subtle; }}
       onMouseOut={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
     >
       <span
@@ -421,16 +407,166 @@ function MenuItem({ icon, label, sublabel, primary, onClick }: {
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: primary ? palette.primarySoft : '#fffdf7',
-          color: primary ? palette.primaryDark : palette.muted,
+          backgroundColor: primary ? theme.accentSoft : theme.subtle,
+          color: primary ? theme.accent : theme.muted,
           flexShrink: 0,
         }}
       >
         {icon}
       </span>
-      <span style={{ flex: 1, fontWeight: 600 }}>{label}</span>
-      {sublabel && <span style={{ fontSize: '11px', color: palette.faint }}>{sublabel}</span>}
-      <ChevronDown size={13} color={palette.faint} style={{ transform: 'rotate(-90deg)' }} />
+      <span style={{ flex: 1, fontWeight: 500 }}>{label}</span>
+      {sublabel && <span style={{ fontSize: '11px', color: theme.faint }}>{sublabel}</span>}
+      <ChevronRight size={13} color={theme.faint} />
     </button>
+  );
+}
+
+/** In-page "Enter activation code" card shown when an export is blocked. */
+function ActivationPrompt({ lang, onClose, onActivated }: {
+  lang: Lang;
+  onClose: () => void;
+  onActivated: () => void;
+}) {
+  const { code, setCode, busy, error, submit } = useActivationForm(lang, onActivated);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const buttonBase: CSSProperties = {
+    height: '38px',
+    borderRadius: '10px',
+    fontSize: '13px',
+    fontWeight: 500,
+    fontFamily: theme.fontSans,
+    cursor: 'pointer',
+    padding: '0 16px',
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="false"
+      aria-label={t('activationTitle', lang)}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === 'Escape') onClose();
+      }}
+      style={{
+        position: 'fixed',
+        right: '24px',
+        bottom: '24px',
+        width: '340px',
+        boxSizing: 'border-box',
+        padding: '22px 22px 20px',
+        background: theme.paper,
+        border: `1px solid ${theme.line}`,
+        borderRadius: '18px',
+        boxShadow: theme.shadowLift,
+        zIndex: 2147483647,
+        pointerEvents: 'auto',
+        fontFamily: theme.fontSans,
+        color: theme.text,
+        animation: 'smartexcel-fadein 0.18s ease',
+      }}
+    >
+      <button
+        onClick={onClose}
+        title={t('close', lang)}
+        aria-label={t('close', lang)}
+        style={{
+          position: 'absolute', top: '14px', right: '14px', width: '28px', height: '28px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          border: 'none', borderRadius: '8px', background: 'transparent',
+          color: theme.faint, cursor: 'pointer',
+        }}
+      >
+        <X size={16} />
+      </button>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+        <span style={{
+          width: '30px', height: '30px', borderRadius: '9px',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          background: theme.accentSoft, color: theme.accent,
+        }}>
+          <KeyRound size={16} />
+        </span>
+        <h2 style={{
+          margin: 0, fontFamily: theme.fontSerif, fontSize: '19px', fontWeight: 500,
+          color: theme.ink, letterSpacing: '-0.01em',
+        }}>
+          {t('activationRequired', lang)}
+        </h2>
+      </div>
+      <p style={{ margin: '0 0 16px', fontSize: '13px', lineHeight: 1.6, color: theme.muted }}>
+        {t('activationIntro', lang)}
+      </p>
+
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+        style={{ display: 'flex', gap: '8px' }}
+      >
+        <input
+          ref={inputRef}
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          placeholder={t('activationCodePlaceholder', lang)}
+          spellCheck={false}
+          autoComplete="off"
+          style={{
+            flex: 1, minWidth: 0, height: '38px', boxSizing: 'border-box',
+            padding: '0 12px', borderRadius: '10px', fontSize: '13px',
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+            letterSpacing: '0.04em', textTransform: 'uppercase',
+            color: theme.ink, background: theme.surface, outline: 'none',
+            border: `1px solid ${error ? theme.danger : theme.lineStrong}`,
+          }}
+        />
+        <button
+          type="submit"
+          disabled={busy}
+          style={{
+            ...buttonBase,
+            border: 'none',
+            background: busy ? theme.faint : theme.accent,
+            color: '#fff',
+            cursor: busy ? 'default' : 'pointer',
+          }}
+        >
+          {busy ? t('activating', lang) : t('activateButton', lang)}
+        </button>
+      </form>
+
+      {error && (
+        <p role="alert" style={{ margin: '10px 0 0', fontSize: '12px', lineHeight: 1.5, color: theme.danger }}>
+          {error}
+        </p>
+      )}
+
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px',
+        marginTop: '18px', paddingTop: '14px', borderTop: `1px solid ${theme.line}`,
+      }}>
+        <span style={{ fontSize: '12px', color: theme.muted }}>{t('noCodeYet', lang)}</span>
+        <button
+          onClick={() => openBuyPage(lang)}
+          style={{
+            ...buttonBase,
+            height: '32px',
+            padding: '0 12px',
+            border: `1px solid ${theme.lineStrong}`,
+            background: theme.surface,
+            color: theme.ink,
+          }}
+        >
+          {t('buyActivation', lang)}
+        </button>
+      </div>
+    </div>
   );
 }

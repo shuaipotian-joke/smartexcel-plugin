@@ -1,5 +1,5 @@
 import ReactDOM from 'react-dom/client';
-import TableOverlay from '@/components/TableOverlay';
+import TableOverlay, { ACTIVATION_PROMPT_EVENT } from '@/components/TableOverlay';
 import { safeSendRuntimeMessage } from '@/utils/extension-runtime';
 import {
   detectTables,
@@ -14,47 +14,46 @@ import {
   copyTableToClipboard,
   prepareExportFile,
 } from '@/utils/excel-export';
-import { t, detectBrowserLang } from '@/utils/i18n';
+import { t } from '@/utils/i18n';
+import type { ExportAccessResult } from '@/utils/messaging';
+import { useExtensionStore } from '@/utils/store';
+import { theme } from '@/utils/theme';
 import '@/assets/styles/tailwind.css';
-
-type CreditCheckResult = {
-  allowed: boolean;
-  remaining?: number;
-  unlimited?: boolean;
-  isLoggedIn: boolean;
-  reason?: string;
-  required?: number;
-};
-
-type ExportAccessResult = CreditCheckResult & { openedFlow?: 'login' | 'payment' };
 
 let toastHost: HTMLDivElement | null = null;
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 let lastContextTable: TableElement | null = null;
 
+function currentLang() {
+  return useExtensionStore.getState().lang;
+}
+
 function showPageToast(message: string, duration = 2200) {
   if (!toastHost) {
     toastHost = document.createElement('div');
-    toastHost.style.position = 'fixed';
-    toastHost.style.left = '50%';
-    toastHost.style.bottom = '24px';
-    toastHost.style.transform = 'translateX(-50%)';
-    toastHost.style.zIndex = '2147483647';
-    toastHost.style.background = '#173127';
-    toastHost.style.color = '#fff';
-    toastHost.style.padding = '10px 18px';
-    toastHost.style.borderRadius = '12px';
-    toastHost.style.fontSize = '13px';
-    toastHost.style.boxShadow = '0 24px 54px -34px rgba(24,79,62,0.58)';
-    toastHost.style.fontFamily = 'Aptos, "Segoe UI Variable", "Segoe UI", Inter, system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif';
-    toastHost.style.whiteSpace = 'nowrap';
-    toastHost.style.pointerEvents = 'none';
-    toastHost.style.opacity = '0';
-    toastHost.style.transition = 'opacity 160ms ease';
+    Object.assign(toastHost.style, {
+      position: 'fixed',
+      left: '50%',
+      bottom: '24px',
+      transform: 'translateX(-50%)',
+      zIndex: '2147483647',
+      background: theme.ink,
+      color: theme.paper,
+      padding: '10px 18px',
+      borderRadius: '12px',
+      fontSize: '13px',
+      lineHeight: '1.4',
+      boxShadow: theme.shadowLift,
+      fontFamily: theme.fontSans,
+      whiteSpace: 'nowrap',
+      pointerEvents: 'none',
+      opacity: '0',
+      transition: 'opacity 160ms ease',
+    } satisfies Partial<CSSStyleDeclaration>);
     document.documentElement.appendChild(toastHost);
   }
 
-  toastHost.textContent = `✓ ${message}`;
+  toastHost.textContent = message;
   toastHost.style.opacity = '1';
 
   if (toastTimer) {
@@ -70,36 +69,17 @@ function showPageToast(message: string, duration = 2200) {
   }
 }
 
-async function requestExportAccess(
-  amount = 1,
-  lang?: 'zh' | 'en'
-): Promise<CreditCheckResult> {
-  const result = await safeSendRuntimeMessage<CreditCheckResult>({
-    type: 'CHECK_EXPORT_ACCESS',
-    payload: { amount, lang },
-  });
-  return result ?? { allowed: false, reason: 'error', isLoggedIn: false };
+function hidePageToast() {
+  if (toastHost) {
+    toastHost.style.opacity = '0';
+  }
 }
 
-async function ensureExportAccess(
-  amount = 1,
-  lang = detectBrowserLang()
-): Promise<ExportAccessResult> {
-  const result = await requestExportAccess(amount, lang);
-  if (result.allowed) {
-    return result;
-  }
-
-  if (result.reason === 'not_logged_in') {
-    await safeSendRuntimeMessage({ type: 'OPEN_LOGIN' });
-    return { ...result, openedFlow: 'login' };
-  }
-
-  await safeSendRuntimeMessage({
-    type: 'OPEN_PAYMENT_PAGE',
-    payload: { lang },
+async function requestExportAccess(): Promise<ExportAccessResult> {
+  const result = await safeSendRuntimeMessage<ExportAccessResult>({
+    type: 'CHECK_EXPORT_ACCESS',
   });
-  return { ...result, openedFlow: 'payment' };
+  return result ?? { allowed: false, reason: 'not_activated' };
 }
 
 function findTableById(
@@ -150,7 +130,8 @@ export default defineContentScript({
   cssInjectionMode: 'ui',
 
   async main(ctx) {
-    const lang = detectBrowserLang();
+    void useExtensionStore.getState().initPrefs();
+
     const ui = await createShadowRootUi(ctx, {
       name: 'smartexcel-overlay',
       position: 'overlay',
@@ -169,20 +150,8 @@ export default defineContentScript({
 
     ui.mount();
 
-    // Relay postMessage from smartexcel.app pages (e.g. plugin-payment after payment success)
-    window.addEventListener('message', (e: MessageEvent) => {
-      if (e.data?.type === 'SE_PLUGIN_AUTH' && e.data?.data) {
-        void safeSendRuntimeMessage({ type: 'PLUGIN_AUTH_SYNC', data: e.data.data });
-      }
-
-      if (e.data?.type === 'SE_PLUGIN_SYNC' && e.data?.data) {
-        void safeSendRuntimeMessage({ type: 'PLUGIN_SYNC', data: e.data.data });
-      }
-
-      if (e.data?.type === 'SE_PLUGIN_LOGOUT') {
-        void safeSendRuntimeMessage({ type: 'CLEAR_PLUGIN_SESSION' });
-      }
-    });
+    // No window postMessage listener: activation state comes only from the
+    // background worker, so web pages cannot change it.
 
     const reportContextTarget = (target: HTMLElement | null) => {
       const hoveredTable = findClosestTableElement(target);
@@ -219,8 +188,9 @@ export default defineContentScript({
       true,
     );
 
-    browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    browser.runtime.onMessage.addListener((message: any, _sender, sendResponse) => {
       const tables = detectTables();
+      const lang = currentLang();
 
       switch (message.type) {
         case 'GET_TABLES': {
@@ -239,9 +209,11 @@ export default defineContentScript({
           break;
         }
 
+        // Popup-initiated exports: when the device is not activated the
+        // popup shows its own activation form, so only the reason is returned.
         case 'EXPORT_TABLE': {
           void (async () => {
-            const access = await ensureExportAccess(1, lang);
+            const access = await requestExportAccess();
             if (!access.allowed) {
               sendResponse({ ok: false, reason: access.reason });
               return;
@@ -249,9 +221,11 @@ export default defineContentScript({
 
             const { format } = message.payload;
             const table = findTableById(tables, message.payload?.tableId);
-            if (table) {
-              exportToExcel(parseTable(table), { format });
+            if (!table) {
+              sendResponse({ ok: false, reason: 'table_not_found' });
+              return;
             }
+            exportToExcel(parseTable(table), { format });
             sendResponse({ ok: true });
           })();
           break;
@@ -263,25 +237,20 @@ export default defineContentScript({
             const exportTables = selectedIds
               ? tables.filter((table) => selectedIds.includes(table.dataset.smartexcelTableId ?? ''))
               : tables;
-            const tableCount = exportTables.length;
-            if (tableCount === 0) {
+            if (exportTables.length === 0) {
               sendResponse({ ok: false, reason: 'table_not_found' });
               return;
             }
-            const access = await ensureExportAccess(tableCount, lang);
+            const access = await requestExportAccess();
             if (!access.allowed) {
-              sendResponse({
-                ok: false,
-                reason: access.reason,
-                required: access.required ?? tableCount,
-              });
+              sendResponse({ ok: false, reason: access.reason });
               return;
             }
 
-            const allParsed = exportTables.map((t) => parseTable(t));
-            if (allParsed.length > 0) {
-              exportMultipleTables(allParsed, document.title || 'tables-export');
-            }
+            exportMultipleTables(
+              exportTables.map((t) => parseTable(t)),
+              document.title || 'tables-export',
+            );
             sendResponse({ ok: true });
           })();
           break;
@@ -289,7 +258,7 @@ export default defineContentScript({
 
         case 'COPY_TABLE': {
           void (async () => {
-            const access = await ensureExportAccess(1, lang);
+            const access = await requestExportAccess();
             if (!access.allowed) {
               sendResponse({ ok: false, reason: access.reason });
               return;
@@ -304,72 +273,44 @@ export default defineContentScript({
           break;
         }
 
-        case 'EXPORT_CONTEXT_TABLE': {
-          void (async () => {
-            const { format, tableId, skipAccessCheck } = message.payload ?? {};
-            if (!skipAccessCheck) {
-              const access = await ensureExportAccess(1, lang);
-              if (!access.allowed) {
-                sendResponse({ ok: false, reason: access.reason });
-                return;
-              }
-            }
-
-            const table = resolveContextTable(tables, tableId);
-            if (!table) {
-              sendResponse({ ok: false, reason: 'table_not_found' });
-              return;
-            }
-
-            try {
-              exportToExcel(parseTable(table), { format });
-              sendResponse({ ok: true });
-            } catch (error) {
-              console.error('context export failed:', error);
-              showPageToast(t('exportFailed', lang));
-              sendResponse({ ok: false, reason: 'export_failed' });
-            }
-          })();
-          break;
-        }
-
+        // Context-menu export: the background checked access already and
+        // downloads the file this frame prepares.
         case 'PREPARE_CONTEXT_EXPORT': {
-          void (async () => {
-            const { format, tableId } = message.payload ?? {};
-            const table = resolveContextTable(tables, tableId);
-            if (!table) {
-              sendResponse({ ok: false, reason: 'table_not_found' });
-              return;
-            }
+          const { format, tableId } = message.payload ?? {};
+          const table = resolveContextTable(tables, tableId);
+          if (!table) {
+            hidePageToast();
+            sendResponse({ ok: false, reason: 'table_not_found' });
+            break;
+          }
 
-            try {
-              const file = prepareExportFile(parseTable(table), { format });
-              sendResponse({ ok: true, file });
-            } catch (error) {
-              console.error('prepare context export failed:', error);
-              showPageToast(t('exportFailed', lang));
-              sendResponse({ ok: false, reason: 'export_failed' });
-            }
-          })();
+          try {
+            const file = prepareExportFile(parseTable(table), { format });
+            sendResponse({ ok: true, file });
+          } catch (error) {
+            console.error('prepare context export failed:', error);
+            showPageToast(t('exportFailed', lang));
+            sendResponse({ ok: false, reason: 'export_failed' });
+          }
           break;
         }
 
         case 'SHOW_EXPORT_FEEDBACK': {
-          const { format, remaining, unlimited } = message.payload ?? {};
-          const fmt = (format ?? 'xlsx').toUpperCase();
-          const messageText =
-            !unlimited && remaining !== undefined
-              ? `${t('exportedAs', lang, { fmt })}${t('trialLeft', lang, { n: remaining })}`
-              : t('exportedAs', lang, { fmt });
-          showPageToast(messageText);
+          const fmt = (message.payload?.format ?? 'xlsx').toUpperCase();
+          showPageToast(t('exportedAs', lang, { fmt }));
           sendResponse({ ok: true });
           break;
         }
 
         case 'SHOW_EXPORT_PROGRESS': {
-          const messageText =
-            message.payload?.message || t('exportingPleaseWait', lang);
-          showPageToast(messageText, 0);
+          showPageToast(message.payload?.message || t('exportingPleaseWait', lang), 0);
+          sendResponse({ ok: true });
+          break;
+        }
+
+        case 'SHOW_ACTIVATION_PROMPT': {
+          hidePageToast();
+          window.dispatchEvent(new CustomEvent(ACTIVATION_PROMPT_EVENT));
           sendResponse({ ok: true });
           break;
         }

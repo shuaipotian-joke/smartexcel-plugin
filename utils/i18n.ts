@@ -1,3 +1,5 @@
+import type { ActivationError } from './activation';
+
 export type Lang = 'zh' | 'en';
 
 export const SUPPORTED_LANGS: Lang[] = ['zh', 'en'];
@@ -14,15 +16,31 @@ const zh = {
   settings: '设置',
   back: '返回',
 
-  // Access bar
-  login: '登录',
-  accessUnlocked: '已解锁 · 无限导出',
-  accessMember: '会员期内免费使用',
-  accessTrial: '免费试用剩余 {n} 次导出',
-  accessExhausted: '免费试用已用完',
-  unlockPlugin: '解锁插件',
-  unlockPluginPrice: '解锁插件 ¥9.9',
-  signupBonusHint: '登录后可用，新用户免费试用 {n} 次导出',
+  // Activation
+  statusActivated: '已激活',
+  statusNotActivated: '未激活',
+  activatedSince: '本设备已激活，可无限导出',
+  activationTitle: '激活 SmartExcel',
+  activationIntro: '输入激活码，即可在本设备上无限导出表格。',
+  activationRequired: '导出前请先激活插件',
+  activationCodePlaceholder: '输入激活码',
+  activateButton: '激活',
+  activating: '正在激活…',
+  activationSuccess: '激活成功，可以开始导出了',
+  buyActivation: '购买激活码 ¥9.9',
+  noCodeYet: '还没有激活码？',
+  codeEnding: '激活码尾号 {hint}',
+  deviceIdLabel: '设备 ID',
+  copy: '复制',
+  copied: '已复制',
+  close: '关闭',
+  activationErrInvalidCode: '激活码无效，请检查后重试',
+  activationErrCodeRevoked: '该激活码已被停用，请联系客服',
+  activationErrCodeUsedByOtherDevice: '该激活码已在其他设备上激活',
+  activationErrBadRequest: '请输入完整的激活码',
+  activationErrRateLimited: '尝试次数过多，请稍后再试',
+  activationErrNetwork: '无法连接激活服务器，请检查网络后重试',
+  activationErrServer: '激活服务暂时不可用，请稍后再试',
 
   // No tables state
   noTablesFound: '当前页面未检测到表格',
@@ -36,8 +54,7 @@ const zh = {
   exportAll: '全部导出',
   exportSelected: '导出选中',
   confirmExportAll: '当前识别到 {count} 个表格，本次将全部导出，确定继续吗？',
-  paywallHint: '免费试用已用完，解锁插件后即可无限导出。',
-  clickToUnlock: '点击这里解锁插件',
+  exportBlockedHint: '插件尚未激活，请先在上方输入激活码。',
 
   // Table card
   selectTable: '选择表格：{title}',
@@ -50,13 +67,10 @@ const zh = {
   // Settings panel
   language: '语言',
   languageRegionHint: '默认根据浏览器地区自动显示语言，也可以在这里手动切换。',
-  usageStats: '使用统计',
-  pluginStatus: '插件状态',
-  notLoggedIn: '未登录',
-  createAccount: '注册新账号',
-  createAccountForBonus: '注册领取 {n} 次免费导出',
-  loggedInAs: '当前账号：{email}',
-  logout: '退出登录',
+  activationSection: '激活状态',
+  pageDisplay: '页面显示',
+  showTableIcon: '在网页上显示表格图标',
+  showTableIconHint: '关闭后不再显示悬停导出按钮，右键菜单和弹窗导出仍可使用。',
 
   // TableOverlay — button / menu labels
   exportTableTitle: 'SmartExcel - 导出表格',
@@ -71,9 +85,7 @@ const zh = {
 
   // TableOverlay — toast messages
   exportedAs: '已导出为 {fmt}',
-  trialLeft: '，免费试用剩余 {n} 次',
   exportingPleaseWait: '请稍等，正在导出…',
-  loginRequiredToExport: '导出前请先登录，新用户免费试用 {n} 次导出',
   exportFailed: '导出失败，请重试',
   copiedToClipboard: '已复制到剪贴板',
   copyFailed: '复制失败，请重试',
@@ -87,14 +99,30 @@ const en: Record<TranslationKey, string> = {
   settings: 'Settings',
   back: 'Back',
 
-  login: 'Login',
-  accessUnlocked: 'Unlocked · unlimited exports',
-  accessMember: 'Free with your membership',
-  accessTrial: '{n} free exports left',
-  accessExhausted: 'Free trial used up',
-  unlockPlugin: 'Unlock plugin',
-  unlockPluginPrice: 'Unlock plugin · $5',
-  signupBonusHint: 'Sign in to export. New users get {n} free exports',
+  statusActivated: 'Activated',
+  statusNotActivated: 'Not activated',
+  activatedSince: 'This device is activated — unlimited exports',
+  activationTitle: 'Activate SmartExcel',
+  activationIntro: 'Enter your activation code to export tables on this device without limits.',
+  activationRequired: 'Activate the extension to export',
+  activationCodePlaceholder: 'Enter activation code',
+  activateButton: 'Activate',
+  activating: 'Activating…',
+  activationSuccess: 'Activated. You can export now.',
+  buyActivation: 'Buy a code · $5',
+  noCodeYet: "Don't have a code?",
+  codeEnding: 'Code ending {hint}',
+  deviceIdLabel: 'Device ID',
+  copy: 'Copy',
+  copied: 'Copied',
+  close: 'Close',
+  activationErrInvalidCode: 'This activation code is not valid. Check it and try again.',
+  activationErrCodeRevoked: 'This activation code has been revoked. Please contact support.',
+  activationErrCodeUsedByOtherDevice: 'This code is already activated on another device.',
+  activationErrBadRequest: 'Please enter a complete activation code.',
+  activationErrRateLimited: 'Too many attempts. Please wait a moment and try again.',
+  activationErrNetwork: 'Could not reach the activation server. Check your connection and try again.',
+  activationErrServer: 'The activation service is unavailable. Please try again later.',
 
   noTablesFound: 'No tables found on this page',
   hoverHint: 'Hover over a table to show the export button',
@@ -106,8 +134,7 @@ const en: Record<TranslationKey, string> = {
   exportAll: 'Export All',
   exportSelected: 'Export selected',
   confirmExportAll: '{count} tables detected. Export all of them now?',
-  paywallHint: 'Free trial used up. Unlock the plugin for unlimited exports.',
-  clickToUnlock: 'Click here to unlock the plugin',
+  exportBlockedHint: 'The extension is not activated yet. Enter your activation code above.',
 
   selectTable: 'Select table: {title}',
   exportExcel: 'Export Excel',
@@ -117,13 +144,10 @@ const en: Record<TranslationKey, string> = {
 
   language: 'Language',
   languageRegionHint: 'The panel follows your browser region by default. You can override it here.',
-  usageStats: 'Usage Stats',
-  pluginStatus: 'Plugin status',
-  notLoggedIn: 'Not logged in',
-  createAccount: 'Create account',
-  createAccountForBonus: 'Create account and get {n} free exports',
-  loggedInAs: 'Signed in as: {email}',
-  logout: 'Log out',
+  activationSection: 'Activation',
+  pageDisplay: 'On pages',
+  showTableIcon: 'Show table icon on pages',
+  showTableIconHint: 'When off, the hover export button is hidden. The right-click menu and popup export still work.',
 
   exportTableTitle: 'SmartExcel - Export Table',
   rowsCols: '{r} rows × {c} cols',
@@ -136,15 +160,28 @@ const en: Record<TranslationKey, string> = {
   aiProcess: 'AI Processing',
 
   exportedAs: 'Exported as {fmt}',
-  trialLeft: ', {n} free exports left',
   exportingPleaseWait: 'Please wait, exporting...',
-  loginRequiredToExport: 'Please sign in before exporting. New users get {n} free exports',
   exportFailed: 'Export failed, please retry',
   copiedToClipboard: 'Copied to clipboard',
   copyFailed: 'Copy failed, please retry',
 };
 
 const dict: Record<Lang, Record<TranslationKey, string>> = { zh, en };
+
+const ACTIVATION_ERROR_KEYS: Record<ActivationError, TranslationKey> = {
+  invalid_code: 'activationErrInvalidCode',
+  code_revoked: 'activationErrCodeRevoked',
+  code_used_by_other_device: 'activationErrCodeUsedByOtherDevice',
+  bad_request: 'activationErrBadRequest',
+  rate_limited: 'activationErrRateLimited',
+  network_error: 'activationErrNetwork',
+  server_error: 'activationErrServer',
+};
+
+/** User-facing text for an activation API error. */
+export function activationErrorText(error: ActivationError, lang: Lang): string {
+  return t(ACTIVATION_ERROR_KEYS[error] ?? 'activationErrServer', lang);
+}
 
 /**
  * Translate a key to the target language with optional variable interpolation.
