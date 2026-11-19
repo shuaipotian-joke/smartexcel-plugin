@@ -9,7 +9,7 @@ import type { ActivateResult, ActivationState } from './activation';
  */
 export function useActivationForm(
   lang: Lang,
-  onActivated?: (state: ActivationState) => void,
+  onActivated?: (state: ActivationState, alreadyActivated: boolean) => void,
 ) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -30,7 +30,7 @@ export function useActivationForm(
     setBusy(false);
     if (result?.ok) {
       setCode('');
-      onActivated?.(result.state);
+      onActivated?.(result.state, result.alreadyActivated === true);
       return;
     }
     setError(activationErrorText(result ? result.error : 'network_error', lang));

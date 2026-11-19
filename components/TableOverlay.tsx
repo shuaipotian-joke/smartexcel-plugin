@@ -18,6 +18,7 @@ import { t, type Lang } from '@/utils/i18n';
 import type { ExportAccessResult } from '@/utils/messaging';
 import { theme } from '@/utils/theme';
 import { openBuyPage, useActivationForm } from '@/utils/use-activation';
+import type { ActivationState } from '@/utils/activation';
 import { ChevronRight, FileSpreadsheet, KeyRound, Table2, X } from 'lucide-react';
 
 /** Window event the content script fires to open the activation prompt. */
@@ -230,7 +231,9 @@ export default function TableOverlay() {
     [fab.table, runExport],
   );
 
-  const handleActivated = useCallback(() => {
+  const handleActivated = useCallback((alreadyActivated = false) => {
+    // The form and the storage listener can both report one activation.
+    if (!promptOpenRef.current) return;
     promptOpenRef.current = false;
     setPromptOpen(false);
     const pending = pendingExport.current;
@@ -238,13 +241,14 @@ export default function TableOverlay() {
     if (pending) {
       runExport(pending);
     } else {
-      showToast(t('activationSuccess', lang));
+      showToast(t(alreadyActivated ? 'alreadyActivated' : 'activationSuccess', lang));
     }
   }, [lang, runExport, showToast]);
 
   // Activated without the code form (paid in another tab): close the prompt
   // and finish the blocked export. A code activation also writes the code
-  // hint and is handled by the form itself.
+  // hint and is handled by the form itself; the short delay lets the form's
+  // answer (which knows "already activated") arrive first.
   useEffect(() => {
     if (!isExtensionContextValid()) return;
     const handler = (changes: Record<string, { newValue?: unknown; oldValue?: unknown }>) => {
@@ -255,7 +259,7 @@ export default function TableOverlay() {
         !changes.se_activation_code_hint &&
         promptOpenRef.current
       ) {
-        handleActivated();
+        setTimeout(() => handleActivated(), 1000);
       }
     };
     return safeAddStorageChangedListener(handler);
@@ -374,7 +378,7 @@ export default function TableOverlay() {
             pendingExport.current = null;
             setPromptOpen(false);
           }}
-          onActivated={handleActivated}
+          onActivated={(_state, alreadyActivated) => handleActivated(alreadyActivated)}
         />
       )}
 
@@ -447,7 +451,7 @@ function MenuItem({ icon, label, sublabel, primary, onClick }: {
 function ActivationPrompt({ lang, onClose, onActivated }: {
   lang: Lang;
   onClose: () => void;
-  onActivated: () => void;
+  onActivated: (state: ActivationState, alreadyActivated: boolean) => void;
 }) {
   const { code, setCode, busy, error, submit } = useActivationForm(lang, onActivated);
   const inputRef = useRef<HTMLInputElement>(null);

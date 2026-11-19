@@ -51,7 +51,11 @@ export type ActivationState = {
 };
 
 export type ActivateResult =
-  | { ok: true; state: ActivationState }
+  /**
+   * `alreadyActivated`: the device was already active (another code or a
+   * purchase); the server kept that and did not use the entered code.
+   */
+  | { ok: true; state: ActivationState; alreadyActivated: boolean }
   | { ok: false; error: ActivationError };
 
 const CONTRACT_ERRORS = new Set<ActivationError>([
@@ -172,13 +176,22 @@ export async function activateDevice(rawCode: string): Promise<ActivateResult> {
   }
 
   if (result.ok && result.data?.activated === true) {
+    // Older servers omit `alreadyActivated`; treat that as a new activation.
+    const alreadyActivated = result.data.alreadyActivated === true;
     await browser.storage.local.set({
       [KEY_ACTIVATED]: true,
       [KEY_ACTIVATED_AT]: String(result.data.activatedAt ?? new Date().toISOString()),
-      [KEY_CODE_HINT]: code.slice(-4),
       [KEY_CHECKED_AT]: Date.now(),
     });
-    return { ok: true, state: await getActivationState() };
+    if (!alreadyActivated) {
+      await browser.storage.local.set({ [KEY_CODE_HINT]: code.slice(-4) });
+    } else if (typeof result.data.codeHint === 'string' && result.data.codeHint) {
+      // The code the device keeps, not the unused one just entered.
+      await browser.storage.local.set({ [KEY_CODE_HINT]: result.data.codeHint });
+    } else if (result.data.activeSource === 'payment') {
+      await browser.storage.local.remove(KEY_CODE_HINT);
+    }
+    return { ok: true, state: await getActivationState(), alreadyActivated };
   }
 
   if (result.status === 429) {
@@ -263,10 +276,34 @@ export async function openPurchasePage(lang: 'zh' | 'en'): Promise<number | unde
 
 const watchedPaymentTabs = new Set<number>();
 
+/** Leave the success page up this long before closing the payment tab. */
+const PAYMENT_TAB_CLOSE_DELAY_MS = 3 * 1000;
+
+/** Origins the payment tab may be on when the extension closes it. */
+const PAYMENT_TAB_ORIGINS = [new URL(SMARTEXCEL_URL).origin, 'https://checkout.stripe.com'];
+
+/**
+ * Close the payment tab the extension opened, after activation. The page
+ * can't reliably close itself (browsers block window.close() after a
+ * redirect). Left open if the user has navigated the tab elsewhere.
+ */
+async function closePaymentTab(tabId: number) {
+  await new Promise((resolve) => setTimeout(resolve, PAYMENT_TAB_CLOSE_DELAY_MS));
+  try {
+    const tab = await browser.tabs.get(tabId);
+    const origin = tab.url ? new URL(tab.url).origin : '';
+    if (!PAYMENT_TAB_ORIGINS.includes(origin)) return;
+    await browser.tabs.remove(tabId);
+  } catch {
+    // Already closed.
+  }
+}
+
 /**
  * Poll the activation status while the payment tab is open (every few
  * seconds, at most 15 minutes) and once more when it closes. Calls
- * `onActivated` once if the device becomes activated.
+ * `onActivated` once if the device becomes activated, then closes the tab
+ * if it is still on the payment site.
  */
 export function watchPaymentTab(tabId: number, onActivated: () => void): void {
   if (watchedPaymentTabs.has(tabId)) return;
@@ -289,7 +326,10 @@ export function watchPaymentTab(tabId: number, onActivated: () => void): void {
     return false;
   };
   const tick = async () => {
-    if (await check()) return;
+    if (await check()) {
+      void closePaymentTab(tabId);
+      return;
+    }
     if (Date.now() - startedAt >= PAYMENT_WATCH_MAX_MS) {
       // Stop polling; the check on close still runs.
       timer = undefined;

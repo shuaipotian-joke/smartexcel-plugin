@@ -150,10 +150,10 @@ export default function App() {
     );
   }, []);
 
-  const handleActivated = useCallback((state: ActivationState) => {
+  const handleActivated = useCallback((state: ActivationState, alreadyActivated: boolean) => {
     setActivation(state);
-    setNotice('');
-  }, []);
+    setNotice(alreadyActivated ? t('alreadyActivated', lang) : '');
+  }, [lang]);
 
   if (showSettings) {
     return (
@@ -189,6 +189,9 @@ export default function App() {
       </div>
 
       <div className="space-y-4 p-5">
+        {activation?.activated && notice && (
+          <p role="status" className="text-xs leading-relaxed text-clay">{notice}</p>
+        )}
         {activation && (
           activation.activated ? (
             <div className="flex items-center gap-2 rounded-xl border border-line bg-white px-3.5 py-2.5 text-xs">
@@ -278,7 +281,7 @@ function ActivationCard({
   lang: Lang;
   inputRef: React.RefObject<HTMLInputElement | null>;
   notice: string;
-  onActivated: (state: ActivationState) => void;
+  onActivated: (state: ActivationState, alreadyActivated: boolean) => void;
 }) {
   const { code, setCode, busy, error, submit } = useActivationForm(lang, onActivated);
   const message = error || notice;
