@@ -133,9 +133,11 @@ export default function SettingsPanel({
                   >
                     {activation.activated ? t('statusActivated', lang) : t('statusNotActivated', lang)}
                   </span>
-                  {activation.activated && activation.codeHint && (
+                  {activation.activated && (
                     <span className="text-xs text-muted">
-                      {t('codeEnding', lang, { hint: activation.codeHint })}
+                      {activation.codeHint
+                        ? t('codeEnding', lang, { hint: activation.codeHint })
+                        : t('activatedByPurchase', lang)}
                     </span>
                   )}
                 </div>

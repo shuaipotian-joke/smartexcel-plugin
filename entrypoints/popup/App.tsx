@@ -194,9 +194,13 @@ export default function App() {
             <div className="flex items-center gap-2 rounded-xl border border-line bg-white px-3.5 py-2.5 text-xs">
               <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
               <span className="flex-1 text-body">{t('activatedSince', lang)}</span>
-              {activation.codeHint && (
+              {activation.codeHint ? (
                 <span className="shrink-0 font-mono text-[11px] text-faint">
                   ···{activation.codeHint}
+                </span>
+              ) : (
+                <span className="shrink-0 text-[11px] text-faint">
+                  {t('activatedByPurchase', lang)}
                 </span>
               )}
             </div>

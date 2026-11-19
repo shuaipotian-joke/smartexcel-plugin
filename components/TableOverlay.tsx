@@ -76,6 +76,8 @@ export default function TableOverlay() {
   const [toast, setToast] = useState('');
   const [promptOpen, setPromptOpen] = useState(false);
   const pendingExport = useRef<PendingExport | null>(null);
+  const promptOpenRef = useRef(false);
+  promptOpenRef.current = promptOpen;
   const hideTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const fabRef = useRef<HTMLDivElement>(null);
@@ -229,6 +231,7 @@ export default function TableOverlay() {
   );
 
   const handleActivated = useCallback(() => {
+    promptOpenRef.current = false;
     setPromptOpen(false);
     const pending = pendingExport.current;
     pendingExport.current = null;
@@ -238,6 +241,25 @@ export default function TableOverlay() {
       showToast(t('activationSuccess', lang));
     }
   }, [lang, runExport, showToast]);
+
+  // Activated without the code form (paid in another tab): close the prompt
+  // and finish the blocked export. A code activation also writes the code
+  // hint and is handled by the form itself.
+  useEffect(() => {
+    if (!isExtensionContextValid()) return;
+    const handler = (changes: Record<string, { newValue?: unknown; oldValue?: unknown }>) => {
+      const activated = changes.se_activated;
+      if (
+        activated?.newValue === true &&
+        activated.oldValue !== true &&
+        !changes.se_activation_code_hint &&
+        promptOpenRef.current
+      ) {
+        handleActivated();
+      }
+    };
+    return safeAddStorageChangedListener(handler);
+  }, [handleActivated]);
 
   if (!contextValid) return null;
 
