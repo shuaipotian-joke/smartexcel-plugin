@@ -1,10 +1,10 @@
 import {
   activateDevice,
+  checkStatusNow,
+  createPaymentQr,
   getActivationState,
   getDeviceId,
-  openPurchasePage,
   refreshActivationIfStale,
-  watchPaymentTab,
 } from '@/utils/activation';
 import type { ExportAccessResult } from '@/utils/messaging';
 
@@ -248,18 +248,30 @@ export default defineBackground(() => {
       return true;
     }
 
-    if (message.type === 'OPEN_PAYMENT_PAGE') {
-      const lang = message.payload?.lang === 'zh' ? 'zh' : 'en';
-      openPurchasePage(lang)
-        .then((tabId) => {
-          // Paying activates this device on the server; pick it up at once.
-          // Popup and overlay follow the storage change.
-          if (tabId != null) watchPaymentTab(tabId, resumePendingContextExport);
-          sendResponse({ ok: true });
+    if (message.type === 'CREATE_PAYMENT_QR') {
+      const payType = message.payload?.payType === 'alipay' ? 'alipay' : 'native';
+      createPaymentQr(payType)
+        .then(sendResponse)
+        .catch((error) => {
+          console.error('create payment QR failed:', error);
+          sendResponse({ ok: false, error: 'network_error' });
+        });
+      return true;
+    }
+
+    // Polled (~2 s) while a payment QR is shown. Paying activates this device
+    // on the server; popup and overlay follow the storage change, and a
+    // blocked context-menu export is finished here.
+    if (message.type === 'CHECK_PAYMENT_STATUS') {
+      checkStatusNow()
+        .then(() => getActivationState())
+        .then((state) => {
+          sendResponse({ activated: state.activated });
+          if (state.activated) resumePendingContextExport();
         })
         .catch((error) => {
-          console.error('open payment page failed:', error);
-          sendResponse({ ok: false });
+          console.error('payment status check failed:', error);
+          sendResponse({ activated: false });
         });
       return true;
     }

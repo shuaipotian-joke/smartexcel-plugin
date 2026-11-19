@@ -43,7 +43,3 @@ export function useActivationForm(
 
   return { code, setCode: updateCode, busy, error, submit };
 }
-
-export function openBuyPage(lang: Lang) {
-  void safeSendRuntimeMessage({ type: 'OPEN_PAYMENT_PAGE', payload: { lang } });
-}

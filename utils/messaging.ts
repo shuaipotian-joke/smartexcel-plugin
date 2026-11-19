@@ -32,7 +32,8 @@ export type TabMessage =
 /** Messages handled by the background worker, with their responses. */
 export type RuntimeMessage =
   | { type: 'SET_CONTEXT_TABLE'; payload: { tableId: string | null; isHeaderContext: boolean } }
-  | { type: 'OPEN_PAYMENT_PAGE'; payload?: { lang?: 'zh' | 'en' } }
+  | { type: 'CREATE_PAYMENT_QR'; payload: { payType: 'native' | 'alipay' } } // → PaymentQrResult
+  | { type: 'CHECK_PAYMENT_STATUS'; payload?: never } // → { activated: boolean }
   | { type: 'CHECK_EXPORT_ACCESS'; payload?: never } // → ExportAccessResult
   | { type: 'ACTIVATE'; payload: { code: string } } // → ActivateResult
   | { type: 'GET_STATE'; payload?: never }; // → ActivationState | null

@@ -17,7 +17,8 @@ import { SHOW_TABLE_ICON_KEY, useExtensionStore } from '@/utils/store';
 import { t, type Lang } from '@/utils/i18n';
 import type { ExportAccessResult } from '@/utils/messaging';
 import { theme } from '@/utils/theme';
-import { openBuyPage, useActivationForm } from '@/utils/use-activation';
+import { useActivationForm } from '@/utils/use-activation';
+import { PaymentQrPanel } from '@/components/PaymentQrPanel';
 import type { ActivationState } from '@/utils/activation';
 import { ChevronRight, FileSpreadsheet, KeyRound, Table2, X } from 'lucide-react';
 
@@ -455,10 +456,11 @@ function ActivationPrompt({ lang, onClose, onActivated }: {
 }) {
   const { code, setCode, busy, error, submit } = useActivationForm(lang, onActivated);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [buying, setBuying] = useState(false);
 
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+    if (!buying) inputRef.current?.focus();
+  }, [buying]);
 
   const buttonBase: CSSProperties = {
     height: '38px',
@@ -526,73 +528,81 @@ function ActivationPrompt({ lang, onClose, onActivated }: {
           {t('activationRequired', lang)}
         </h2>
       </div>
-      <p style={{ margin: '0 0 16px', fontSize: '13px', lineHeight: 1.6, color: theme.muted }}>
-        {t('activationIntro', lang)}
-      </p>
+      {buying ? (
+        <div style={{ marginTop: '14px' }}>
+          <PaymentQrPanel lang={lang} onHaveCode={() => setBuying(false)} />
+        </div>
+      ) : (
+        <>
+          <p style={{ margin: '0 0 16px', fontSize: '13px', lineHeight: 1.6, color: theme.muted }}>
+            {t('activationIntro', lang)}
+          </p>
 
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void submit();
-        }}
-        style={{ display: 'flex', gap: '8px' }}
-      >
-        <input
-          ref={inputRef}
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          placeholder={t('activationCodePlaceholder', lang)}
-          spellCheck={false}
-          autoComplete="off"
-          style={{
-            flex: 1, minWidth: 0, height: '38px', boxSizing: 'border-box',
-            padding: '0 12px', borderRadius: '10px', fontSize: '13px',
-            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-            letterSpacing: '0.04em', textTransform: 'uppercase',
-            color: theme.ink, background: theme.surface, outline: 'none',
-            border: `1px solid ${error ? theme.danger : theme.lineStrong}`,
-          }}
-        />
-        <button
-          type="submit"
-          disabled={busy}
-          style={{
-            ...buttonBase,
-            border: 'none',
-            background: busy ? theme.faint : theme.accent,
-            color: '#fff',
-            cursor: busy ? 'default' : 'pointer',
-          }}
-        >
-          {busy ? t('activating', lang) : t('activateButton', lang)}
-        </button>
-      </form>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submit();
+            }}
+            style={{ display: 'flex', gap: '8px' }}
+          >
+            <input
+              ref={inputRef}
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder={t('activationCodePlaceholder', lang)}
+              spellCheck={false}
+              autoComplete="off"
+              style={{
+                flex: 1, minWidth: 0, height: '38px', boxSizing: 'border-box',
+                padding: '0 12px', borderRadius: '10px', fontSize: '13px',
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+                letterSpacing: '0.04em', textTransform: 'uppercase',
+                color: theme.ink, background: theme.surface, outline: 'none',
+                border: `1px solid ${error ? theme.danger : theme.lineStrong}`,
+              }}
+            />
+            <button
+              type="submit"
+              disabled={busy}
+              style={{
+                ...buttonBase,
+                border: 'none',
+                background: busy ? theme.faint : theme.accent,
+                color: '#fff',
+                cursor: busy ? 'default' : 'pointer',
+              }}
+            >
+              {busy ? t('activating', lang) : t('activateButton', lang)}
+            </button>
+          </form>
 
-      {error && (
-        <p role="alert" style={{ margin: '10px 0 0', fontSize: '12px', lineHeight: 1.5, color: theme.danger }}>
-          {error}
-        </p>
+          {error && (
+            <p role="alert" style={{ margin: '10px 0 0', fontSize: '12px', lineHeight: 1.5, color: theme.danger }}>
+              {error}
+            </p>
+          )}
+
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px',
+            marginTop: '18px', paddingTop: '14px', borderTop: `1px solid ${theme.line}`,
+          }}>
+            <span style={{ fontSize: '12px', color: theme.muted }}>{t('noCodeYet', lang)}</span>
+            <button
+              onClick={() => setBuying(true)}
+              style={{
+                ...buttonBase,
+                height: '32px',
+                padding: '0 12px',
+                border: `1px solid ${theme.lineStrong}`,
+                background: theme.surface,
+                color: theme.ink,
+              }}
+            >
+              {t('buyActivation', lang)}
+            </button>
+          </div>
+        </>
       )}
-
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px',
-        marginTop: '18px', paddingTop: '14px', borderTop: `1px solid ${theme.line}`,
-      }}>
-        <span style={{ fontSize: '12px', color: theme.muted }}>{t('noCodeYet', lang)}</span>
-        <button
-          onClick={() => openBuyPage(lang)}
-          style={{
-            ...buttonBase,
-            height: '32px',
-            padding: '0 12px',
-            border: `1px solid ${theme.lineStrong}`,
-            background: theme.surface,
-            color: theme.ink,
-          }}
-        >
-          {t('buyActivation', lang)}
-        </button>
-      </div>
     </div>
   );
 }

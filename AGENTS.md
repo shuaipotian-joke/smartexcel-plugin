@@ -10,7 +10,7 @@ The plugin is coupled to the sibling website repo `../smartexcel` (Next.js, `/ap
 - **Device ID:** a random UUID created on first run (`utils/activation.ts` → `getDeviceId`), kept in `storage.local` and mirrored to `storage.sync` so a reinstall on the same browser profile keeps it.
 - **Activated or not.** An activated device exports without limits; a locked device blocks every export with an "Enter activation code" card plus a "Buy" button (popup and in-page prompt).
 - **Activation codes are single-use.** A code activates one device, once. The same code on the same device again is fine (idempotent); a code that was unbound by an admin can never be used again. Admins generate codes on smarterexcel.com.
-- **Buying activates the device directly, without a code.** "Buy" opens `/{zh|en}/plugin-payment?source=extension&closeAfterPayment=true&deviceId=…` (always locale-prefixed: an unprefixed path follows the site's `NEXT_LOCALE` cookie and could show the wrong currency). The payment webhook activates that device id on the server. Price: ¥9.9 via XorPay (zh) or $5 via Stripe (en); one-time, separate from website credits.
+- **Buying activates the device directly, without a code, a login or a web page.** "Buy" shows a XorPay QR (WeChat Pay or Alipay, ¥9.9, one-time, separate from website credits) inside the card; the order is created on click and bound to the device id, and the XorPay notify activates that device on the server. Domestic only: the extension has no Stripe / USD path and never opens `/plugin-payment` (that page needs a website login).
 - **Already-active device + new code:** the server keeps the existing activation and does not use the code; the response has `alreadyActivated: true`. The extension shows "This device is already activated" and keeps the existing code hint (or "Activated by purchase").
 
 The production `.env.local` points `WXT_SMARTEXCEL_URL` at `https://smarterexcel.com`. When the variable is unset, production builds (`wxt build` / `wxt zip`) use `https://smarterexcel.com` and only dev mode (`npm run dev*`) falls back to `http://localhost:42100`; the single source of truth is `SMARTEXCEL_URL` in `utils/activation.ts`. Never call `api.smarterexcel.com` or `/v1/*`.
@@ -23,6 +23,7 @@ Called from the background worker only (CORS allows extension origins):
 | --- | --- | --- | --- |
 | `POST /api/plugin/activation/activate` | `{ code, deviceId, browser?, version? }` | 200 `{ activated: true, activatedAt, alreadyActivated, activeSource?, codeHint? }`; 400/403/404/409 `{ activated: false, error }` with `bad_request` / `code_revoked` / `invalid_code` / `code_used_by_other_device`; 429 `rate_limited` | 10 per 10 min |
 | `POST /api/plugin/activation/status` | `{ deviceId, browser?, version? }` | 200 `{ activated, activatedAt? }` | 600 per 10 min |
+| `POST /api/plugin/payment/xorpay/create` | `{ deviceId, payType?: 'native' \| 'alipay' }` | 200 `{ orderId, qrContent, amount, currency, payType, expiresAt, reused }`; 400 `invalid_device_id` / `invalid_pay_type`; 502 `xorpay_create_failed`; 503 `xorpay_not_configured`; 429 `rate_limited` | 60 calls per IP, 30 per device; 20 new orders per IP, 6 per device (per 10 min) |
 
 `alreadyActivated`, `activeSource` (`code` / `payment`) and `codeHint` (last 4 chars of the code the device keeps, null for a payment) are extra fields; older servers omit them and the extension then treats the answer as a new activation.
 
@@ -33,10 +34,10 @@ The old `/api/plugin/auth/*`, `/api/plugin/access` and `/api/plugin/credits` end
 - **Start:** `background.ts` creates the device ID and calls `refreshActivationIfStale()`. A cached activation is trusted at once (works offline); an activated device re-checks `/status` about once a day, a locked one after a minute. Only an explicit `{ activated: false }` from the server locks; network/server errors keep the cache.
 - **Export:** content/popup → `CHECK_EXPORT_ACCESS` → `{ allowed }` from the cache. Blocked context-menu exports are kept and finished after activation.
 - **Code:** popup/overlay form → `ACTIVATE` → `activateDevice()` → storage update → popup and overlay follow `storage.onChanged`.
-- **Buy:** `OPEN_PAYMENT_PAGE` → `openPurchasePage()` opens the tab and `watchPaymentTab()` polls `/status` every 4 s while it is open (max 15 min) and once when it closes. When the device is activated it unlocks, finishes a pending export, and after 3 s closes the payment tab **it opened**, but only if that tab is still on the website or `checkout.stripe.com` (browsers block the page's own `window.close()` after a Stripe redirect).
+- **Buy:** the card swaps to `components/PaymentQrPanel.tsx` (`utils/use-payment-qr.ts`): ¥9.9 and a placeholder at once, `CREATE_PAYMENT_QR` → `createPaymentQr()` → website, the raw QR string is drawn locally with `uqr` (SVG, no remote image). While the QR shows, `CHECK_PAYMENT_STATUS` (→ `/status`) runs every 2 s; unmounting the panel stops it. Paid → storage flips, popup/overlay unlock and the blocked export finishes (overlay exports in the overlay, context-menu exports in the background). An expired QR is replaced automatically; errors show zh/en text and a retry button. "Already have a code?" goes back to the code form.
 - **No window messages.** The content script has no `window` `message` listener and the website no longer posts `SE_PLUGIN_SYNC`; activation state only comes from the background's own API calls. If a page→extension message is ever needed again, accept it only from `https://smarterexcel.com`.
 
-Background message types (`utils/messaging.ts`): `SET_CONTEXT_TABLE`, `OPEN_PAYMENT_PAGE`, `CHECK_EXPORT_ACCESS`, `ACTIVATE`, `GET_STATE`. Content-script types: `GET_TABLES`, `EXPORT_TABLE`, `EXPORT_ALL`, `COPY_TABLE`, `PREPARE_CONTEXT_EXPORT`, `SHOW_EXPORT_FEEDBACK`, `SHOW_EXPORT_PROGRESS`, `SHOW_ACTIVATION_PROMPT`.
+Background message types (`utils/messaging.ts`): `SET_CONTEXT_TABLE`, `CREATE_PAYMENT_QR`, `CHECK_PAYMENT_STATUS`, `CHECK_EXPORT_ACCESS`, `ACTIVATE`, `GET_STATE`. Content-script types: `GET_TABLES`, `EXPORT_TABLE`, `EXPORT_ALL`, `COPY_TABLE`, `PREPARE_CONTEXT_EXPORT`, `SHOW_EXPORT_FEEDBACK`, `SHOW_EXPORT_PROGRESS`, `SHOW_ACTIVATION_PROMPT`.
 
 ## Storage keys (`browser.storage.local`)
 
@@ -52,8 +53,9 @@ Background message types (`utils/messaging.ts`): `SET_CONTEXT_TABLE`, `OPEN_PAYM
 
 ## Repo layout
 
-- `entrypoints/background.ts`: message routing, access check, context menu, payment-tab watch.
-- `utils/activation.ts`: device ID, activate/status calls, cache, purchase page and payment-tab watch/close.
+- `entrypoints/background.ts`: message routing, access check, context menu, payment QR + status relay.
+- `utils/activation.ts`: device ID, activate/status/payment-QR calls, cache.
+- `components/PaymentQrPanel.tsx` + `utils/use-payment-qr.ts`: Buy view (QR, polling, expiry refresh, errors), shared by popup and overlay.
 - `utils/use-activation.ts`: activation-code form hook shared by popup and overlay; `openBuyPage`.
 - `entrypoints/content.tsx`: table detection on pages, mounts the overlay, runs exports.
 - `entrypoints/popup/App.tsx` (tables, activation card) and `SettingsPanel.tsx` (language, activation status, device ID, table-icon toggle).
@@ -75,7 +77,7 @@ Background message types (`utils/messaging.ts`): `SET_CONTEXT_TABLE`, `OPEN_PAYM
 1. Website (`../smartexcel`, pnpm): a local Postgres on `127.0.0.1:62100` (Docker), or PGlite without Docker: in a scratch folder `npm install @electric-sql/pglite @electric-sql/pglite-socket`, `npx pglite-server --db=./data --port=62199 --max-connections=10`, set `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:62199/postgres?sslmode=disable` **and `DATABASE_POOL_MAX=1`** (PGlite runs one connection; without it you get random ECONNRESET 500s) in the website `.env.local`, run `pnpm db:migrate` and apply `0009_dual_credit_balances.sql` by hand (missing from the drizzle journal). Start `pnpm dev` (port 42100).
 2. Admin: sign up, set the user's `role` to `admin` in the DB, open `/admin/plugin-activation` and generate codes.
 3. Extension: `WXT_SMARTEXCEL_URL=http://localhost:42100` in `.env.local`, `npm run build`, load `.output/chrome-mv3/` unpacked.
-4. Check: locked export shows the code card; a code activates; the same code on a second device profile gives "already activated on another device"; a second code on an active device shows "already activated" and stays unused in the admin table; revoke/unbind in admin locks the device after the next status check; Buy opens the locale page, a (simulated) paid order unlocks the popup, finishes a pending export, and closes the payment tab; the table-icon toggle hides the hover icon on all tabs.
+4. Check: locked export shows the code card; a code activates; the same code on a second device profile gives "already activated on another device"; a second code on an active device shows "already activated" and stays unused in the admin table; revoke/unbind in admin locks the device after the next status check; Buy shows the QR in the card (no tab), a (simulated) paid order unlocks the popup/overlay and finishes a pending export; the table-icon toggle hides the hover icon on all tabs.
 5. Restart the dev server between full runs: the activate limit is 10 per 10 min per IP and is kept in memory.
 
 ## Done means

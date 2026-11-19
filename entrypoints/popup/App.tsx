@@ -4,7 +4,8 @@ import type { ExportResult, TableInfo } from '@/utils/messaging';
 import { useExtensionStore } from '@/utils/store';
 import { t, type Lang } from '@/utils/i18n';
 import { ensureContentScript } from '@/utils/ensure-content-script';
-import { openBuyPage, useActivationForm } from '@/utils/use-activation';
+import { useActivationForm } from '@/utils/use-activation';
+import { PaymentQrPanel } from '@/components/PaymentQrPanel';
 import {
   CheckCircle2,
   FileSpreadsheet,
@@ -285,6 +286,15 @@ function ActivationCard({
 }) {
   const { code, setCode, busy, error, submit } = useActivationForm(lang, onActivated);
   const message = error || notice;
+  const [buying, setBuying] = useState(false);
+
+  if (buying) {
+    return (
+      <div className="rounded-2xl border border-line bg-white p-4 shadow-soft">
+        <PaymentQrPanel lang={lang} onHaveCode={() => setBuying(false)} />
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-2xl border border-line bg-white p-4 shadow-soft">
@@ -332,7 +342,7 @@ function ActivationCard({
       <div className="mt-3.5 flex items-center justify-between border-t border-line pt-3">
         <span className="text-xs text-muted">{t('noCodeYet', lang)}</span>
         <button
-          onClick={() => openBuyPage(lang)}
+          onClick={() => setBuying(true)}
           className="rounded-lg border border-line-strong bg-white px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-subtle"
         >
           {t('buyActivation', lang)}

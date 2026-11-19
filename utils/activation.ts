@@ -6,6 +6,7 @@
  *
  *   POST /api/plugin/activation/activate { code, deviceId, browser?, version? }
  *   POST /api/plugin/activation/status   { deviceId }
+ *   POST /api/plugin/payment/xorpay/create { deviceId, payType } (Buy: QR order)
  *
  * The cached result is trusted on start so exports work offline; the server is
  * re-checked at most about once a day and only an explicit
@@ -23,14 +24,12 @@ export const SMARTEXCEL_URL =
 
 const ACTIVATE_URL = `${SMARTEXCEL_URL}/api/plugin/activation/activate`;
 const STATUS_URL = `${SMARTEXCEL_URL}/api/plugin/activation/status`;
+const PAYMENT_QR_URL = `${SMARTEXCEL_URL}/api/plugin/payment/xorpay/create`;
 
 /** Re-check an activated device at most this often. */
 const ACTIVATED_RECHECK_MS = 24 * 60 * 60 * 1000;
-/** A locked device asks again at most this often (e.g. after paying on the website). */
+/** A locked device asks again at most this often (e.g. after paying elsewhere). */
 const LOCKED_RECHECK_MS = 60 * 1000;
-/** While a payment tab is open, ask this often, for at most this long. */
-const PAYMENT_POLL_MS = 4 * 1000;
-const PAYMENT_WATCH_MAX_MS = 15 * 60 * 1000;
 
 const KEY_DEVICE_ID = 'se_device_id';
 const KEY_ACTIVATED = 'se_activated';
@@ -263,92 +262,58 @@ export async function refreshActivationIfStale(): Promise<void> {
   return statusCheck;
 }
 
+/** XorPay QR channel: `native` = WeChat Pay, `alipay` = Alipay. */
+export type PaymentPayType = 'native' | 'alipay';
+
+/** A pending XorPay order for this device; `qrContent` is the raw QR string. */
+export type PaymentQrOrder = {
+  orderId: string;
+  qrContent: string;
+  amount: string;
+  payType: PaymentPayType;
+  expiresAt: string;
+};
+
+export type PaymentQrError = 'rate_limited' | 'network_error' | 'server_error';
+
+export type PaymentQrResult =
+  | { ok: true; order: PaymentQrOrder }
+  | { ok: false; error: PaymentQrError };
+
 /**
- * Where "Buy" goes: the one-time plugin payment page with this device's ID.
- * A successful payment activates the device on the server (no code); the
- * returned tab is watched with `watchPaymentTab` to pick that up.
+ * "Buy": a XorPay order (¥9.9, WeChat Pay or Alipay) bound to this device,
+ * created on click. The server reuses a pending order of the device, and its
+ * notify handler activates the device once paid; the caller polls
+ * `checkStatusNow` meanwhile. No web page, no account.
  */
-export async function openPurchasePage(lang: 'zh' | 'en'): Promise<number | undefined> {
+export async function createPaymentQr(payType: PaymentPayType): Promise<PaymentQrResult> {
   const deviceId = await getDeviceId();
-  // Always prefix the locale: an unprefixed path follows the site's
-  // NEXT_LOCALE cookie, so "Buy · $5" could land on the ¥9.9 zh page.
-  const url = new URL(`/${lang}/plugin-payment`, SMARTEXCEL_URL);
-  url.searchParams.set('source', 'extension');
-  url.searchParams.set('closeAfterPayment', 'true');
-  url.searchParams.set('deviceId', deviceId);
-  const tab = await browser.tabs.create({ url: url.toString() });
-  return tab.id;
-}
-
-const watchedPaymentTabs = new Set<number>();
-
-/** Leave the success page up this long before closing the payment tab. */
-const PAYMENT_TAB_CLOSE_DELAY_MS = 3 * 1000;
-
-/** Origins the payment tab may be on when the extension closes it. */
-const PAYMENT_TAB_ORIGINS = [new URL(SMARTEXCEL_URL).origin, 'https://checkout.stripe.com'];
-
-/**
- * Close the payment tab the extension opened, after activation. The page
- * can't reliably close itself (browsers block window.close() after a
- * redirect). Left open if the user has navigated the tab elsewhere.
- */
-async function closePaymentTab(tabId: number) {
-  await new Promise((resolve) => setTimeout(resolve, PAYMENT_TAB_CLOSE_DELAY_MS));
+  let result: Awaited<ReturnType<typeof postJson>>;
   try {
-    const tab = await browser.tabs.get(tabId);
-    const origin = tab.url ? new URL(tab.url).origin : '';
-    if (!PAYMENT_TAB_ORIGINS.includes(origin)) return;
-    await browser.tabs.remove(tabId);
-  } catch {
-    // Already closed.
+    result = await postJson(PAYMENT_QR_URL, { deviceId, payType });
+  } catch (error) {
+    console.error('payment QR request failed:', error);
+    return { ok: false, error: 'network_error' };
   }
-}
-
-/**
- * Poll the activation status while the payment tab is open (every few
- * seconds, at most 15 minutes) and once more when it closes. Calls
- * `onActivated` once if the device becomes activated, then closes the tab
- * if it is still on the payment site.
- */
-export function watchPaymentTab(tabId: number, onActivated: () => void): void {
-  if (watchedPaymentTabs.has(tabId)) return;
-  watchedPaymentTabs.add(tabId);
-  const startedAt = Date.now();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-
-  const stop = () => {
-    clearTimeout(timer);
-    watchedPaymentTabs.delete(tabId);
-    browser.tabs.onRemoved.removeListener(onRemoved);
-  };
-  const check = async () => {
-    await checkStatusNow();
-    if ((await getActivationState()).activated) {
-      stop();
-      onActivated();
-      return true;
-    }
-    return false;
-  };
-  const tick = async () => {
-    if (await check()) {
-      void closePaymentTab(tabId);
-      return;
-    }
-    if (Date.now() - startedAt >= PAYMENT_WATCH_MAX_MS) {
-      // Stop polling; the check on close still runs.
-      timer = undefined;
-      return;
-    }
-    timer = setTimeout(() => void tick(), PAYMENT_POLL_MS);
-  };
-  function onRemoved(closedTabId: number) {
-    if (closedTabId !== tabId) return;
-    stop();
-    void check();
+  const data = result.data;
+  if (
+    result.ok &&
+    typeof data?.orderId === 'string' &&
+    typeof data.qrContent === 'string' &&
+    data.qrContent &&
+    typeof data.expiresAt === 'string'
+  ) {
+    return {
+      ok: true,
+      order: {
+        orderId: data.orderId,
+        qrContent: data.qrContent,
+        amount: String(data.amount ?? ''),
+        payType: data.payType === 'alipay' ? 'alipay' : 'native',
+        expiresAt: data.expiresAt,
+      },
+    };
   }
-
-  browser.tabs.onRemoved.addListener(onRemoved);
-  timer = setTimeout(() => void tick(), PAYMENT_POLL_MS);
+  if (result.status === 429) return { ok: false, error: 'rate_limited' };
+  return { ok: false, error: 'server_error' };
 }
