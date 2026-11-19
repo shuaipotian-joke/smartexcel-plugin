@@ -67,7 +67,8 @@ Background message types (`utils/messaging.ts`): `SET_CONTEXT_TABLE`, `OPEN_PAYM
 - Use `npm` here (not pnpm). `npm install`, then `npm run dev` / `dev:edge` / `dev:firefox`.
 - `npm run build`, `npm run build:edge`, `npm run build:firefox`, `npm run build:all`; zips with `npm run zip*` (release only, with the owner's go-ahead).
 - Type check: `npx wxt prepare && npx tsc --noEmit`.
-- There are no unit tests. The minimum gate is both builds plus tsc; access or export changes also need a browser run.
+- `npm test` (vitest + happy-dom) runs parser + export tests on the HTML fixtures in `tests/fixtures/` (`tests/table-export.test.ts`); add a fixture there for any parsing/export change. happy-dom has no layout, so the test stubs `getBoundingClientRect`. The minimum gate is both builds, tsc and `npm test`; access or export changes also need a browser run (`tests/fixtures/merged-cells.html` doubles as a browser test page).
+- Installing needs `npm install --allow-remote=root` on npm 12+: `xlsx` comes from the SheetJS CDN tarball, which npm refuses by default.
 
 ## Testing against a local website
 
@@ -80,4 +81,12 @@ Background message types (`utils/messaging.ts`): `SET_CONTEXT_TABLE`, `OPEN_PAYM
 ## Done means
 
 - Both builds and tsc pass, and the change was checked in a real browser (popup, overlay and background path together). Record what you could not test.
-- For table/export changes, export at least one real `.xlsx` or `.csv` from a page with tables. Known gap: rowspan cells and multi-row headers are not merged in exports.
+- For table/export changes, export at least one real `.xlsx` or `.csv` from a page with tables. The right-click export only fires from a header cell (`isHeaderContext` in `content.tsx`).
+
+## Merged cells in exports
+
+- `parseTable` returns `headerRows` (every `<thead>` row; without `<thead>`, a first row of `<th>` cells, an empty `<td>` corner allowed) and `merges` in sheet coordinates (row 0 = first header row). `headers` is the last header row.
+- Covered cells: a rowspan value is repeated in `headerRows`/`rows`, colspan continuation cells are empty. Rowspan is clamped to its row group (`thead`/`tbody`/`tfoot`), `rowspan="0"` spans to the group end. Rows of nested tables are not rows of the outer table.
+- **xlsx:** every merge (rowspan + colspan, header + body) goes into `!merges`; only the top-left cell keeps the value. With the index column, `#` spans all header rows.
+- **CSV and clipboard** (no merges): the flat values above, i.e. rowspan values repeated on each row, colspan cells empty. This is what CSV did before.
+- Div grids have no merges.
