@@ -12,8 +12,14 @@
  * `{ activated: false }` from the server locks the extension again.
  */
 
+/**
+ * The website. An explicit `WXT_SMARTEXCEL_URL` always wins; otherwise only dev
+ * mode (`wxt`) falls back to the local website, every production build
+ * (`wxt build` / `wxt zip`) uses smarterexcel.com.
+ */
 export const SMARTEXCEL_URL =
-  import.meta.env.WXT_SMARTEXCEL_URL || 'http://localhost:42100';
+  import.meta.env.WXT_SMARTEXCEL_URL ||
+  (import.meta.env.DEV ? 'http://localhost:42100' : 'https://smarterexcel.com');
 
 const ACTIVATE_URL = `${SMARTEXCEL_URL}/api/plugin/activation/activate`;
 const STATUS_URL = `${SMARTEXCEL_URL}/api/plugin/activation/status`;

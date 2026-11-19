@@ -13,7 +13,7 @@ The plugin is coupled to the sibling website repo `../smartexcel` (Next.js, `/ap
 - **Buying activates the device directly, without a code.** "Buy" opens `/{zh|en}/plugin-payment?source=extension&closeAfterPayment=true&deviceId=…` (always locale-prefixed: an unprefixed path follows the site's `NEXT_LOCALE` cookie and could show the wrong currency). The payment webhook activates that device id on the server. Price: ¥9.9 via XorPay (zh) or $5 via Stripe (en); one-time, separate from website credits.
 - **Already-active device + new code:** the server keeps the existing activation and does not use the code; the response has `alreadyActivated: true`. The extension shows "This device is already activated" and keeps the existing code hint (or "Activated by purchase").
 
-The production `.env.local` points `WXT_SMARTEXCEL_URL` at `https://smarterexcel.com`; it defaults to `http://localhost:42100`. Never call `api.smarterexcel.com` or `/v1/*`.
+The production `.env.local` points `WXT_SMARTEXCEL_URL` at `https://smarterexcel.com`. When the variable is unset, production builds (`wxt build` / `wxt zip`) use `https://smarterexcel.com` and only dev mode (`npm run dev*`) falls back to `http://localhost:42100`; the single source of truth is `SMARTEXCEL_URL` in `utils/activation.ts`. Never call `api.smarterexcel.com` or `/v1/*`.
 
 ## Activation API (website)
 

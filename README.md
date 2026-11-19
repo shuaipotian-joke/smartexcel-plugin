@@ -23,7 +23,7 @@ It is the browser companion of the SmartExcel website (smarterexcel.com). The ex
 | Buy | Opens `/{zh,en}/plugin-payment?deviceId=…&closeAfterPayment=true`. The payment activates the device on the server; the extension polls the status, unlocks, finishes a blocked export and closes the payment tab it opened. |
 | Start-up | A cached activation is trusted immediately (works offline) and re-checked about once a day. Only an explicit "not activated" from the server locks the extension again. |
 
-Endpoints (on `WXT_SMARTEXCEL_URL`, default `http://localhost:42100`, production `https://smarterexcel.com`):
+Endpoints (on `WXT_SMARTEXCEL_URL`, default `https://smarterexcel.com` in builds and `http://localhost:42100` in dev mode):
 
 - `POST /api/plugin/activation/activate` `{ code, deviceId, browser?, version? }`: 10 requests per 10 min per IP.
 - `POST /api/plugin/activation/status` `{ deviceId }`: 600 requests per 10 min per IP.
